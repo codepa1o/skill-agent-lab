@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Run #{{ run.id }} - Skill Agent Lab</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <script defer src="{{ url_for('static', path='app.js') }}"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">测试详情</p>
+          <h1>Run #{{ run.id }}</h1>
+        </div>
+        <div class="action-row">
+          <form action="/runs/{{ run.id }}/rerun" method="post" data-rerun-form>
+            <button class="secondary-button" type="submit">重新运行</button>
+          </form>
+          <a class="nav-link" href="/">返回首页</a>
+        </div>
+      </header>
+
+      <section class="notice">
+        这是基于 Skill 的角色模拟与测试，不代表真实人物、机构或官方建议。
+      </section>
+
+      <section class="panel">
+        <h2>运行信息</h2>
+        <dl class="detail-list">
+          <dt>状态</dt>
+          <dd class="status {{ run.status }}">{{ "成功" if run.status == "success" else "失败" }}</dd>
+          <dt>模型</dt>
+          <dd>{{ run.model or "-" }}</dd>
+          <dt>API 模式</dt>
+          <dd>{{ run.api_mode or "-" }}</dd>
+          <dt>Base URL</dt>
+          <dd>{{ run.base_url or "-" }}</dd>
+          <dt>推理强度</dt>
+          <dd>{{ run.reasoning_effort or "-" }}</dd>
+          <dt>耗时</dt>
+          <dd>{{ run.latency_ms }} ms</dd>
+          <dt>创建时间</dt>
+          <dd>{{ run.created_at }}</dd>
+          <dt>Skill URL</dt>
+          <dd><a href="{{ run.skill_url }}" target="_blank" rel="noreferrer">{{ run.skill_url }}</a></dd>
+          <dt>Raw URL</dt>
+          <dd>{{ run.raw_url or "-" }}</dd>
+        </dl>
+      </section>
+
+      <section class="panel">
+        <h2>测试问题</h2>
+        <p class="question">{{ run.question }}</p>
+      </section>
+
+      <section class="panel">
+        {% if run.status == "success" %}
+          <h2>Agent 回答</h2>
+          <pre class="answer">{{ run.answer }}</pre>
+        {% else %}
+          <h2>错误信息</h2>
+          <p class="error-text">{{ run.error_message }}</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

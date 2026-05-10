@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>历史记录 - Skill Agent Lab</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <script defer src="{{ url_for('static', path='app.js') }}"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">历史记录</p>
+          <h1>最近 100 次测试</h1>
+        </div>
+        <a class="nav-link" href="/">返回首页</a>
+      </header>
+
+      <section class="panel">
+        {% if runs %}
+          <div class="history-table">
+            <div class="history-head">
+              <span>状态</span>
+              <span>问题</span>
+              <span>模型</span>
+              <span>模式</span>
+              <span>耗时</span>
+              <span>时间</span>
+              <span>操作</span>
+            </div>
+            {% for run in runs %}
+              <div class="history-row">
+                <span class="status {{ run.status }}">{{ "成功" if run.status == "success" else "失败" }}</span>
+                <a class="history-question" href="/runs/{{ run.id }}">{{ run.question }}</a>
+                <span>{{ run.model or "-" }}</span>
+                <span>{{ run.api_mode or "-" }}</span>
+                <span>{{ run.latency_ms }} ms</span>
+                <span>{{ run.created_at }}</span>
+                <form action="/runs/{{ run.id }}/rerun" method="post" data-rerun-form>
+                  <button class="icon-button" type="submit">重新运行</button>
+                </form>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty">还没有测试记录。</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

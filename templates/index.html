@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Skill Agent Lab</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <script defer src="{{ url_for('static', path='app.js') }}"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Skill Agent Lab</p>
+          <h1>GitHub Skill 角色测试台</h1>
+        </div>
+        <div class="runtime-pills">
+          <span class="model-pill">模型 {{ default_model }}</span>
+          <span class="model-pill">模式 {{ api_mode }}</span>
+          {% if reasoning_effort %}
+            <span class="model-pill">推理 {{ reasoning_effort }}</span>
+          {% endif %}
+          {% if base_url %}
+            <span class="model-pill">Base URL {{ base_url }}</span>
+          {% endif %}
+          <a class="nav-link" href="/runs">历史记录</a>
+        </div>
+      </header>
+
+      <section class="notice">
+        这是基于 Skill 的角色模拟与测试，不代表真实人物、机构或官方建议。
+      </section>
+
+      {% if error %}
+        <section class="alert">{{ error }}</section>
+      {% endif %}
+
+      <section class="panel">
+        <div class="panel-title-row">
+          <h2>新建测试</h2>
+          <span class="form-status" id="form-status">待运行</span>
+        </div>
+        <form class="run-form" action="/runs" method="post" data-run-form>
+          <label for="skill_url">GitHub Skill URL</label>
+          <input
+            id="skill_url"
+            name="skill_url"
+            type="url"
+            required
+            value="{{ selected_run.skill_url if selected_run else default_skill_url }}"
+            placeholder="https://github.com/owner/repo/blob/main/SKILL.md"
+          >
+
+          <label for="question">测试问题</label>
+          <textarea
+            id="question"
+            name="question"
+            required
+            rows="7"
+            placeholder="例如：我是浙江考生，617 分，普通家庭，想学计算机，靠谱吗？建议我报什么学校？"
+          >{{ selected_run.question if selected_run else "" }}</textarea>
+
+          <button type="submit" data-submit-button>运行测试</button>
+        </form>
+      </section>
+
+      {% if selected_run %}
+        <section class="panel result-panel">
+          <div class="panel-title-row">
+            <h2>本次结果</h2>
+            <div class="action-row">
+              <form action="/runs/{{ selected_run.id }}/rerun" method="post" data-rerun-form>
+                <button class="secondary-button" type="submit">重新运行</button>
+              </form>
+              <a href="/runs/{{ selected_run.id }}">查看详情</a>
+            </div>
+          </div>
+          <dl class="meta-grid wide">
+            <div>
+              <dt>状态</dt>
+              <dd class="status {{ selected_run.status }}">{{ "成功" if selected_run.status == "success" else "失败" }}</dd>
+            </div>
+            <div>
+              <dt>模型</dt>
+              <dd>{{ selected_run.model or "-" }}</dd>
+            </div>
+            <div>
+              <dt>模式</dt>
+              <dd>{{ selected_run.api_mode or "-" }}</dd>
+            </div>
+            <div>
+              <dt>推理强度</dt>
+              <dd>{{ selected_run.reasoning_effort or "-" }}</dd>
+            </div>
+            <div>
+              <dt>耗时</dt>
+              <dd>{{ selected_run.latency_ms }} ms</dd>
+            </div>
+            <div>
+              <dt>时间</dt>
+              <dd>{{ selected_run.created_at }}</dd>
+            </div>
+          </dl>
+          <h3>问题</h3>
+          <p class="question">{{ selected_run.question }}</p>
+          {% if selected_run.status == "success" %}
+            <h3>回答</h3>
+            <pre class="answer">{{ selected_run.answer }}</pre>
+          {% else %}
+            <h3>错误</h3>
+            <p class="error-text">{{ selected_run.error_message }}</p>
+          {% endif %}
+        </section>
+      {% endif %}
+
+      <section class="panel">
+        <div class="panel-title-row">
+          <h2>最近测试记录</h2>
+          <span class="muted">{{ runs|length }} 条</span>
+        </div>
+        {% if runs %}
+          <div class="run-list">
+            {% for run in runs %}
+              <article class="run-item-card">
+                <a class="run-main" href="/runs/{{ run.id }}">
+                  <span class="run-status {{ run.status }}">{{ "成功" if run.status == "success" else "失败" }}</span>
+                  <span class="run-question">{{ run.question }}</span>
+                </a>
+                <div class="run-meta">
+                  <span>{{ run.model or "-" }}</span>
+                  <span>{{ run.api_mode or "-" }}</span>
+                  <span>{{ run.latency_ms }} ms</span>
+                  <span>{{ run.created_at }}</span>
+                </div>
+                <form action="/runs/{{ run.id }}/rerun" method="post" data-rerun-form>
+                  <button class="icon-button" type="submit">重新运行</button>
+                </form>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty">还没有测试记录。</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>
