@@ -6,7 +6,7 @@
 
 ## 项目截图
 
-启动服务后访问 `http://127.0.0.1:8000`，建议截图保存到 `docs/screenshot-home.png`，用于简历或 README 展示。
+启动服务后访问终端输出的本地地址，建议截图保存到 `docs/screenshot-home.png`，用于简历或 README 展示。
 
 ![首页截图](docs/screenshot-home.png)
 
@@ -44,13 +44,25 @@
 cd E:\pythonlearning\code\agent_learning\skill-agent-lab
 .\skill-lab\Scripts\Activate.ps1
 pip install -r requirements.txt
-uvicorn app.main:app --reload
+python scripts\dev_server.py
 ```
 
 访问：
 
 ```text
-http://127.0.0.1:8000
+终端输出的地址，例如 http://127.0.0.1:7860
+```
+
+这个脚本会自动选择一个可绑定的端口，比如：
+
+```text
+http://127.0.0.1:7860
+```
+
+也可以手动换一个端口启动：
+
+```powershell
+uvicorn app.main:app --reload --host 127.0.0.1 --port 7860
 ```
 
 ## freemodel.dev 配置
@@ -123,7 +135,7 @@ SELECT id, status, model, api_mode, reasoning_effort, latency_ms, created_at FRO
 访问：
 
 ```text
-http://127.0.0.1:8000/evals
+http://127.0.0.1:7860/evals
 ```
 
 系统首次启动会自动创建“张雪峰 Skill 基础评测集”，包含：
@@ -169,7 +181,7 @@ SEARCH_MAX_RESULTS=5
 访问：
 
 ```text
-http://127.0.0.1:8000/knowledge
+http://127.0.0.1:7860/knowledge
 ```
 
 支持上传：
@@ -210,7 +222,7 @@ JOB_MAX_ATTEMPTS=1
 访问系统诊断页：
 
 ```text
-http://127.0.0.1:8000/settings/diagnostics
+http://127.0.0.1:7860/settings/diagnostics
 ```
 
 诊断页会检查 OpenAI 兼容模型、Tavily、DashScope、RAG 参数和后台任务 worker 是否配置完整。
