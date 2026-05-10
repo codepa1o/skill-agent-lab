@@ -45,11 +45,16 @@ def average_score(scores: list[float]) -> float:
 
 
 async def run_suite_evaluation(suite_id: int) -> int:
+    eval_run_id = create_eval_run(suite_id=suite_id)
+    await execute_eval_run(suite_id=suite_id, eval_run_id=eval_run_id)
+    return eval_run_id
+
+
+async def execute_eval_run(*, suite_id: int, eval_run_id: int) -> None:
     suite = get_test_suite(suite_id)
     if not suite:
         raise ValueError("测试集不存在。")
 
-    eval_run_id = create_eval_run(suite_id=suite_id)
     scores: list[float] = []
 
     try:
@@ -131,8 +136,7 @@ async def run_suite_evaluation(suite_id: int) -> int:
         )
     except (SkillLoadError, ValueError) as exc:
         update_eval_run(eval_run_id, status="failed", error_message=str(exc))
-
-    return eval_run_id
+        raise
 
 
 async def build_eval_variants(skill_content: str, question: str) -> list[EvalVariant]:

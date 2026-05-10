@@ -589,6 +589,37 @@ dd {
   text-decoration: none;
 }
 
+.diagnostic-list {
+  display: grid;
+  gap: 12px;
+}
+
+.diagnostic-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f9fbfd;
+}
+
+.diagnostic-card.failed {
+  border-color: #f0b7a7;
+  background: #fff5f1;
+}
+
+.diagnostic-card.warning {
+  border-color: #f0d59b;
+  background: #fffaf0;
+}
+
+.diagnostic-card h3,
+.diagnostic-card p {
+  margin-bottom: 0;
+}
+
 .chunk-card pre {
   margin: 0;
   color: #18202f;

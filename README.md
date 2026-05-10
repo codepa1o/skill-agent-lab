@@ -79,6 +79,9 @@ RAG_TOP_K=5
 RAG_MIN_SCORE=0.2
 RAG_CHUNK_SIZE=800
 RAG_CHUNK_OVERLAP=120
+JOB_WORKER_ENABLED=true
+JOB_POLL_INTERVAL_SECONDS=2
+JOB_MAX_ATTEMPTS=1
 ```
 
 复杂问题更容易触发中转站超时，所以第一版建议先用 `medium`。
@@ -113,6 +116,7 @@ SELECT id, status, model, api_mode, reasoning_effort, latency_ms, created_at FRO
 - `test_cases`：测试用例，保存问题、期望行为和评分重点。
 - `eval_runs`：一次批量评测运行。
 - `eval_results`：每条用例的 Agent 回答、Judge 分数和评语。
+- `jobs`：后台任务队列，保存资料索引和评测运行的状态、结果和错误。
 
 ## 评测中心
 
@@ -144,7 +148,7 @@ Judge 评分维度：
 - `baseline`：不使用搜索、不使用本地资料库，只按 Skill 回答。
 - `enhanced`：自动使用本地资料库 RAG，并在需要时使用搜索增强。
 
-报告页会展示两组回答、两组评分、来源引用分，以及 enhanced 相比 baseline 的总分差值。这个功能可以用来判断搜索/RAG 是否真的提升了回答质量。
+报告页会展示两组回答、两组评分、来源引用分，以及 enhanced 相比 baseline 的总分差值。评测会创建后台任务，页面会自动刷新任务状态，刷新浏览器也不会丢失已完成的结果。
 
 ## 搜索增强
 
@@ -174,7 +178,7 @@ http://127.0.0.1:8000/knowledge
 - 文本：`.txt`
 - PDF：`.pdf`
 
-上传后系统会自动解析文档、切分文本、调用阿里云百炼 Embedding API 生成向量，并保存到 SQLite。后续对话、单次运行和评测都会自动检索本地资料；命中资料时，回答末尾会出现 `【本地资料来源】`。
+上传后系统会创建后台索引任务，自动解析文档、切分文本、调用阿里云百炼 Embedding API 生成向量，并保存到 SQLite。文档详情页会显示排队中、索引中、就绪或失败状态，并支持重新索引。后续对话、单次运行和评测都会自动检索本地资料；命中资料时，回答末尾会出现 `【本地资料来源】`。
 
 RAG 使用阿里云百炼 OpenAI 兼容 Embedding 接口，默认配置：
 
@@ -190,6 +194,26 @@ EMBEDDING_DIMENSIONS=1024
 - 文本向量同步接口：https://help.aliyun.com/zh/model-studio/text-embedding-synchronous-api/
 
 如果没有配置 `DASHSCOPE_API_KEY`，上传资料会保存失败状态并展示错误；普通对话仍然可以继续，只是不会命中本地资料。
+
+## 后台任务与系统诊断
+
+第四版引入 SQLite 后台任务队列，用于避免资料索引和批量评测长时间卡住页面。服务启动后会启动一个轻量 worker，依次执行 `index_document` 和 `run_eval_suite` 任务。
+
+配置：
+
+```text
+JOB_WORKER_ENABLED=true
+JOB_POLL_INTERVAL_SECONDS=2
+JOB_MAX_ATTEMPTS=1
+```
+
+访问系统诊断页：
+
+```text
+http://127.0.0.1:8000/settings/diagnostics
+```
+
+诊断页会检查 OpenAI 兼容模型、Tavily、DashScope、RAG 参数和后台任务 worker 是否配置完整。
 
 ## 测试
 
@@ -209,6 +233,9 @@ pytest
 - 默认测试集初始化
 - Judge JSON 解析
 - 评测运行和评测结果保存
+- SQLite jobs 任务创建、claim、完成和失败记录
+- 后台 worker 执行资料索引任务
+- 资料上传和评测运行创建后台任务
 - Markdown / TXT 文档切分
 - RAG 向量检索、来源拼接和失败状态保存
 

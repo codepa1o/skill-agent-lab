@@ -275,3 +275,74 @@ def test_rename_conversation(tmp_path, monkeypatch):
     assert response.status_code == 303
     assert conversation is not None
     assert conversation.title == "新标题"
+
+
+def test_upload_knowledge_document_creates_job(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_store, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(run_store, "DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr(main, "ensure_default_test_suites", lambda: None)
+
+    async def fake_save_uploaded_document(file):
+        return run_store.create_rag_document(
+            filename="note.txt",
+            file_type="txt",
+            file_path="data/uploads/note.txt",
+            status="queued",
+        )
+
+    monkeypatch.setattr(main, "save_uploaded_document", fake_save_uploaded_document)
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            "/knowledge/upload",
+            files={"file": ("note.txt", b"hello", "text/plain")},
+            follow_redirects=False,
+        )
+
+    document_id = int(response.headers["location"].split("/knowledge/")[1])
+    job = run_store.get_latest_job_for_target("index_document", "document_id", document_id)
+
+    assert response.status_code == 303
+    assert job is not None
+    assert job.status == "queued"
+
+
+def test_run_eval_suite_creates_job(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_store, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(run_store, "DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr(main, "ensure_default_test_suites", lambda: None)
+
+    suite_id = run_store.create_test_suite(
+        name="测试集",
+        skill_url="https://github.com/owner/repo/blob/main/SKILL.md",
+    )
+
+    with TestClient(main.app) as client:
+        response = client.post(
+            f"/evals/suites/{suite_id}/run",
+            follow_redirects=False,
+        )
+
+    eval_run_id = int(response.headers["location"].split("/evals/runs/")[1])
+    job = run_store.get_latest_job_for_target("run_eval_suite", "eval_run_id", eval_run_id)
+
+    assert response.status_code == 303
+    assert job is not None
+    assert job.payload["suite_id"] == suite_id
+
+
+def test_job_status_endpoint_returns_json(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_store, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(run_store, "DB_PATH", tmp_path / "test.db")
+    monkeypatch.setattr(main, "ensure_default_test_suites", lambda: None)
+    monkeypatch.setenv("JOB_WORKER_ENABLED", "false")
+    job_id = run_store.create_job(
+        job_type="index_document",
+        payload={"document_id": 1},
+    )
+
+    with TestClient(main.app) as client:
+        response = client.get(f"/jobs/{job_id}")
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"

@@ -26,3 +26,15 @@ const messageList = document.querySelector("[data-message-list]");
 if (messageList) {
   messageList.scrollTop = messageList.scrollHeight;
 }
+
+const jobStatus = document.querySelector("[data-job-status]");
+
+if (jobStatus) {
+  const status = jobStatus.dataset.jobStatus;
+  if (status === "queued" || status === "running") {
+    const pollInterval = Number(jobStatus.dataset.pollInterval || "2") * 1000;
+    window.setTimeout(() => {
+      window.location.reload();
+    }, Math.max(1000, pollInterval));
+  }
+}

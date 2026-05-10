@@ -3,7 +3,7 @@ from urllib.parse import quote
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -17,15 +17,21 @@ from app.agent_runner import (
     run_skill_agent,
 )
 from app.default_data import ensure_default_test_suites
+from app.diagnostics import build_diagnostics
 from app.eval_service import run_suite_evaluation
+from app.job_worker import start_worker, stop_worker
 from app.run_store import (
     create_conversation,
+    create_eval_run,
+    create_job,
     create_message,
     create_run,
     get_conversation,
     get_run,
     get_eval_run,
+    get_job,
     get_rag_document,
+    get_latest_job_for_target,
     get_test_suite,
     init_db,
     list_eval_results,
@@ -40,6 +46,7 @@ from app.run_store import (
     rename_conversation,
     create_test_case,
     create_test_suite,
+    update_rag_document,
 )
 from app.rag_service import (
     RagError,
@@ -49,7 +56,7 @@ from app.rag_service import (
     remove_document,
     retrieve_local_context,
     serialize_rag_results,
-    upload_and_index_document,
+    save_uploaded_document,
 )
 from app.search_service import (
     append_sources,
@@ -71,9 +78,15 @@ templates = Jinja2Templates(directory=BASE_DIR / "templates")
 
 
 @app.on_event("startup")
-def on_startup() -> None:
+async def on_startup() -> None:
     init_db()
     ensure_default_test_suites()
+    start_worker()
+
+
+@app.on_event("shutdown")
+async def on_shutdown() -> None:
+    await stop_worker()
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -361,6 +374,17 @@ async def run_detail(request: Request, run_id: int):
     )
 
 
+@app.get("/settings/diagnostics", response_class=HTMLResponse)
+async def diagnostics_page(request: Request):
+    return templates.TemplateResponse(
+        request,
+        "diagnostics.html",
+        {
+            "items": build_diagnostics(),
+        },
+    )
+
+
 @app.get("/knowledge", response_class=HTMLResponse)
 async def knowledge_index(request: Request, error: str = ""):
     return templates.TemplateResponse(
@@ -376,7 +400,8 @@ async def knowledge_index(request: Request, error: str = ""):
 @app.post("/knowledge/upload")
 async def upload_knowledge_document(file: UploadFile = File(...)):
     try:
-        document_id = await upload_and_index_document(file)
+        document_id = await save_uploaded_document(file)
+        create_job(job_type="index_document", payload={"document_id": document_id})
     except RagError as exc:
         return RedirectResponse(
             url=f"/knowledge?error={quote(friendly_error_message(str(exc)))}",
@@ -396,8 +421,19 @@ async def knowledge_detail(request: Request, document_id: int):
         {
             "document": document,
             "chunks": list_rag_chunks(document_id),
+            "job": get_latest_job_for_target("index_document", "document_id", document_id),
         },
     )
+
+
+@app.post("/knowledge/{document_id}/reindex")
+async def reindex_knowledge_document(document_id: int):
+    document = get_rag_document(document_id)
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
+    update_rag_document(document_id, status="queued", error_message="", chunk_count=document.chunk_count)
+    create_job(job_type="index_document", payload={"document_id": document_id})
+    return RedirectResponse(url=f"/knowledge/{document_id}", status_code=303)
 
 
 @app.post("/knowledge/{document_id}/delete")
@@ -516,7 +552,11 @@ async def create_case_endpoint(
 async def run_suite_endpoint(suite_id: int):
     if not get_test_suite(suite_id):
         raise HTTPException(status_code=404, detail="Suite not found")
-    eval_run_id = await run_suite_evaluation(suite_id)
+    eval_run_id = create_eval_run(suite_id=suite_id, status="running")
+    create_job(
+        job_type="run_eval_suite",
+        payload={"suite_id": suite_id, "eval_run_id": eval_run_id},
+    )
     return RedirectResponse(url=f"/evals/runs/{eval_run_id}", status_code=303)
 
 
@@ -532,7 +572,29 @@ async def eval_run_detail(request: Request, eval_run_id: int):
             "eval_run": eval_run,
             "results": list_eval_results(eval_run_id),
             "result_groups": group_eval_results(list_eval_results(eval_run_id)),
+            "job": get_latest_job_for_target("run_eval_suite", "eval_run_id", eval_run_id),
         },
+    )
+
+
+@app.get("/jobs/{job_id}")
+async def job_status(job_id: int):
+    job = get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    return JSONResponse(
+        {
+            "id": job.id,
+            "type": job.type,
+            "status": job.status,
+            "payload": job.payload,
+            "result": job.result,
+            "error_message": job.error_message,
+            "attempt_count": job.attempt_count,
+            "created_at": job.created_at,
+            "started_at": job.started_at,
+            "finished_at": job.finished_at,
+        }
     )
 
 

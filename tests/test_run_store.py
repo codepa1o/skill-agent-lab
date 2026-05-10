@@ -184,3 +184,45 @@ def test_rag_document_and_chunks_are_saved(tmp_path, monkeypatch):
     assert document.status == "ready"
     assert document.chunk_count == 1
     assert chunks[0].document_filename == "资料.md"
+
+
+def test_job_lifecycle_is_saved(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_store, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(run_store, "DB_PATH", tmp_path / "test.db")
+
+    job_id = run_store.create_job(
+        job_type="index_document",
+        payload={"document_id": 42},
+    )
+    claimed = run_store.claim_next_job()
+
+    assert claimed is not None
+    assert claimed.id == job_id
+    assert claimed.status == "running"
+    assert claimed.payload["document_id"] == 42
+
+    run_store.complete_job(job_id, {"ok": True})
+    completed = run_store.get_job(job_id)
+
+    assert completed is not None
+    assert completed.status == "completed"
+    assert completed.result["ok"] is True
+
+
+def test_job_failure_is_saved(tmp_path, monkeypatch):
+    monkeypatch.setattr(run_store, "DATA_DIR", tmp_path)
+    monkeypatch.setattr(run_store, "DB_PATH", tmp_path / "test.db")
+
+    job_id = run_store.create_job(
+        job_type="run_eval_suite",
+        payload={"suite_id": 1},
+    )
+    claimed = run_store.claim_next_job()
+    assert claimed is not None
+
+    run_store.fail_job(job_id, "失败原因")
+    failed = run_store.get_job(job_id)
+
+    assert failed is not None
+    assert failed.status == "failed"
+    assert failed.error_message == "失败原因"

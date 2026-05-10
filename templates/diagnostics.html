@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>系统诊断 - Skill Agent Lab</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Settings</p>
+          <h1>系统诊断</h1>
+        </div>
+        <div class="action-row">
+          <a class="nav-link" href="/">返回首页</a>
+          <a class="nav-link" href="/knowledge">本地资料库</a>
+          <a class="nav-link" href="/evals">评测中心</a>
+        </div>
+      </header>
+
+      <section class="notice">
+        这里用于快速检查模型、中转站、搜索、Embedding、RAG 和后台任务配置是否完整。
+      </section>
+
+      <section class="panel">
+        <h2>配置状态</h2>
+        <div class="diagnostic-list">
+          {% for item in items %}
+            <article class="diagnostic-card {{ item.status }}">
+              <div>
+                <h3>{{ item.name }}</h3>
+                <p>{{ item.message }}</p>
+              </div>
+              <span class="status {{ 'success' if item.status == 'success' else 'failed' if item.status == 'failed' else '' }}">
+                {{ "正常" if item.status == "success" else "错误" if item.status == "failed" else "提醒" }}
+              </span>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -18,6 +18,9 @@
           <form action="/knowledge/{{ document.id }}/delete" method="post">
             <button class="secondary-button" type="submit">删除资料</button>
           </form>
+          <form action="/knowledge/{{ document.id }}/reindex" method="post">
+            <button class="secondary-button" type="submit">重新索引</button>
+          </form>
           <a class="nav-link" href="/knowledge">返回资料库</a>
           <a class="nav-link" href="/">返回首页</a>
         </div>
@@ -25,10 +28,16 @@
 
       <section class="panel">
         <h2>索引信息</h2>
+        {% if job %}
+          <section class="notice" data-job-status="{{ job.status }}" data-poll-interval="2">
+            后台任务 #{{ job.id }}：{{ "排队中" if job.status == "queued" else "运行中" if job.status == "running" else "已完成" if job.status == "completed" else "失败" }}
+            {% if job.error_message %}。{{ job.error_message }}{% endif %}
+          </section>
+        {% endif %}
         <dl class="detail-list">
           <dt>状态</dt>
           <dd class="status {{ 'success' if document.status == 'ready' else 'failed' if document.status == 'failed' else '' }}">
-            {{ "就绪" if document.status == "ready" else "失败" if document.status == "failed" else "索引中" }}
+            {{ "就绪" if document.status == "ready" else "失败" if document.status == "failed" else "排队中" if document.status == "queued" else "索引中" }}
           </dd>
           <dt>文件类型</dt>
           <dd>{{ document.file_type }}</dd>

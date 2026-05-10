@@ -1,3 +1,4 @@
+import json
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -146,6 +147,21 @@ CREATE TABLE IF NOT EXISTS eval_results (
 )
 """
 
+CREATE_JOBS_TABLE_SQL = """
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    status TEXT NOT NULL,
+    payload_json TEXT NOT NULL DEFAULT '{}',
+    result_json TEXT NOT NULL DEFAULT '{}',
+    error_message TEXT NOT NULL DEFAULT '',
+    attempt_count INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    started_at TEXT NOT NULL DEFAULT '',
+    finished_at TEXT NOT NULL DEFAULT ''
+)
+"""
+
 
 @dataclass(frozen=True)
 class RunRecord:
@@ -276,15 +292,46 @@ class RagChunkRecord:
     document_filename: str = ""
 
 
+@dataclass(frozen=True)
+class JobRecord:
+    id: int
+    type: str
+    status: str
+    payload_json: str
+    result_json: str
+    error_message: str
+    attempt_count: int
+    created_at: str
+    started_at: str
+    finished_at: str
+
+    @property
+    def payload(self) -> dict[str, object]:
+        try:
+            data = json.loads(self.payload_json)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+    @property
+    def result(self) -> dict[str, object]:
+        try:
+            data = json.loads(self.result_json)
+        except json.JSONDecodeError:
+            return {}
+        return data if isinstance(data, dict) else {}
+
+
 def _connect() -> sqlite3.Connection:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(DB_PATH)
+    connection = sqlite3.connect(DB_PATH, timeout=30)
     connection.row_factory = sqlite3.Row
     return connection
 
 
 def init_db() -> None:
     with _connect() as connection:
+        connection.execute("PRAGMA journal_mode=WAL")
         connection.execute(CREATE_RUNS_TABLE_SQL)
         connection.execute(CREATE_CONVERSATIONS_TABLE_SQL)
         connection.execute(CREATE_MESSAGES_TABLE_SQL)
@@ -294,6 +341,7 @@ def init_db() -> None:
         connection.execute(CREATE_EVAL_RESULTS_TABLE_SQL)
         connection.execute(CREATE_RAG_DOCUMENTS_TABLE_SQL)
         connection.execute(CREATE_RAG_CHUNKS_TABLE_SQL)
+        connection.execute(CREATE_JOBS_TABLE_SQL)
         _ensure_column(connection, "runs", "api_mode", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "runs", "base_url", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "runs", "reasoning_effort", "TEXT NOT NULL DEFAULT ''")
@@ -915,6 +963,116 @@ def list_rag_chunks(document_id: int | None = None) -> list[RagChunkRecord]:
     return [_row_to_rag_chunk(row) for row in rows]
 
 
+def create_job(
+    *,
+    job_type: str,
+    payload: dict[str, object],
+    status: str = "queued",
+) -> int:
+    init_db()
+    with _connect() as connection:
+        cursor = connection.execute(
+            """
+            INSERT INTO jobs (
+                type, status, payload_json, result_json, error_message,
+                attempt_count, created_at, started_at, finished_at
+            )
+            VALUES (?, ?, ?, '{}', '', 0, ?, '', '')
+            """,
+            (job_type, status, json.dumps(payload, ensure_ascii=False), _now()),
+        )
+        return int(cursor.lastrowid)
+
+
+def get_job(job_id: int) -> JobRecord | None:
+    init_db()
+    with _connect() as connection:
+        row = connection.execute(
+            """
+            SELECT id, type, status, payload_json, result_json, error_message,
+                   attempt_count, created_at, started_at, finished_at
+            FROM jobs
+            WHERE id = ?
+            """,
+            (job_id,),
+        ).fetchone()
+    return _row_to_job(row) if row else None
+
+
+def get_latest_job_for_target(job_type: str, target_key: str, target_id: int) -> JobRecord | None:
+    init_db()
+    with _connect() as connection:
+        rows = connection.execute(
+            """
+            SELECT id, type, status, payload_json, result_json, error_message,
+                   attempt_count, created_at, started_at, finished_at
+            FROM jobs
+            WHERE type = ?
+            ORDER BY id DESC
+            LIMIT 100
+            """,
+            (job_type,),
+        ).fetchall()
+    for row in rows:
+        job = _row_to_job(row)
+        if int(job.payload.get(target_key) or 0) == target_id:
+            return job
+    return None
+
+
+def claim_next_job() -> JobRecord | None:
+    init_db()
+    with _connect() as connection:
+        connection.execute("BEGIN IMMEDIATE")
+        row = connection.execute(
+            """
+            SELECT id, type, status, payload_json, result_json, error_message,
+                   attempt_count, created_at, started_at, finished_at
+            FROM jobs
+            WHERE status = 'queued'
+            ORDER BY id ASC
+            LIMIT 1
+            """
+        ).fetchone()
+        if not row:
+            return None
+        connection.execute(
+            """
+            UPDATE jobs
+            SET status = 'running', started_at = ?, attempt_count = attempt_count + 1
+            WHERE id = ? AND status = 'queued'
+            """,
+            (_now(), row["id"]),
+        )
+    return get_job(row["id"])
+
+
+def complete_job(job_id: int, result: dict[str, object] | None = None) -> None:
+    init_db()
+    with _connect() as connection:
+        connection.execute(
+            """
+            UPDATE jobs
+            SET status = 'completed', result_json = ?, error_message = '', finished_at = ?
+            WHERE id = ?
+            """,
+            (json.dumps(result or {}, ensure_ascii=False), _now(), job_id),
+        )
+
+
+def fail_job(job_id: int, error_message: str, result: dict[str, object] | None = None) -> None:
+    init_db()
+    with _connect() as connection:
+        connection.execute(
+            """
+            UPDATE jobs
+            SET status = 'failed', result_json = ?, error_message = ?, finished_at = ?
+            WHERE id = ?
+            """,
+            (json.dumps(result or {}, ensure_ascii=False), error_message, _now(), job_id),
+        )
+
+
 def _row_to_record(row: sqlite3.Row) -> RunRecord:
     return RunRecord(
         id=row["id"],
@@ -1050,4 +1208,19 @@ def _row_to_rag_chunk(row: sqlite3.Row) -> RagChunkRecord:
         embedding_dim=row["embedding_dim"],
         created_at=row["created_at"],
         document_filename=row["document_filename"],
+    )
+
+
+def _row_to_job(row: sqlite3.Row) -> JobRecord:
+    return JobRecord(
+        id=row["id"],
+        type=row["type"],
+        status=row["status"],
+        payload_json=row["payload_json"],
+        result_json=row["result_json"],
+        error_message=row["error_message"],
+        attempt_count=row["attempt_count"],
+        created_at=row["created_at"],
+        started_at=row["started_at"],
+        finished_at=row["finished_at"],
     )

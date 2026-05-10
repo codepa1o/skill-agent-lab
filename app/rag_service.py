@@ -90,6 +90,12 @@ def get_rag_chunk_overlap() -> int:
 
 
 async def upload_and_index_document(file: UploadFile) -> int:
+    document_id = await save_uploaded_document(file)
+    index_document(document_id)
+    return document_id
+
+
+async def save_uploaded_document(file: UploadFile) -> int:
     original_filename = Path(file.filename or "").name
     if not original_filename:
         raise RagError("请选择要上传的资料文件。")
@@ -108,11 +114,21 @@ async def upload_and_index_document(file: UploadFile) -> int:
         filename=original_filename,
         file_type=file_type.lstrip("."),
         file_path=_stored_file_path(stored_path),
-        status="indexing",
+        status="queued",
     )
+    return document_id
 
+
+def index_document(document_id: int) -> None:
+    document = get_rag_document(document_id)
+    if not document:
+        raise RagError("资料不存在或已被删除。")
+    path = Path(document.file_path)
+    if not path.is_absolute():
+        path = BASE_DIR / document.file_path
+    update_rag_document(document_id, status="indexing", error_message="", chunk_count=0)
     try:
-        sections = load_document_sections(stored_path)
+        sections = load_document_sections(path)
         chunks = chunk_document(
             sections,
             chunk_size=get_rag_chunk_size(),
@@ -131,14 +147,14 @@ async def upload_and_index_document(file: UploadFile) -> int:
             status="failed",
             error_message=str(exc),
         )
+        raise RagError(str(exc)) from exc
     except Exception as exc:
         update_rag_document(
             document_id,
             status="failed",
             error_message=f"资料索引失败：{exc}",
         )
-
-    return document_id
+        raise RagError(f"资料索引失败：{exc}") from exc
 
 
 def remove_document(document_id: int) -> None:

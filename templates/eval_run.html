@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>评测报告 #{{ eval_run.id }} - Skill Agent Lab</title>
     <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <script defer src="{{ url_for('static', path='app.js') }}"></script>
   </head>
   <body>
     <main class="shell">
@@ -21,6 +22,12 @@
       </section>
 
       <section class="panel">
+        {% if job %}
+          <section class="notice" data-job-status="{{ job.status }}" data-poll-interval="2">
+            后台任务 #{{ job.id }}：{{ "排队中" if job.status == "queued" else "运行中" if job.status == "running" else "已完成" if job.status == "completed" else "失败" }}
+            {% if job.error_message %}。{{ job.error_message }}{% endif %}
+          </section>
+        {% endif %}
         <dl class="meta-grid">
           <div>
             <dt>状态</dt>
