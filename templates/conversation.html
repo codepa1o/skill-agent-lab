@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ conversation.title }} - Skill Agent Lab</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <script defer src="{{ url_for('static', path='app.js') }}"></script>
+  </head>
+  <body>
+    <main class="shell conversation-shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">对话窗口</p>
+          <h1>{{ conversation.title }}</h1>
+        </div>
+        <div class="action-row">
+          <a class="nav-link" href="/">返回主页</a>
+          <a class="nav-link" href="/">新建对话</a>
+          <a class="nav-link" href="/runs">运行日志</a>
+          <a class="nav-link" href="/knowledge">本地资料库</a>
+        </div>
+      </header>
+
+      {% if error %}
+        <section class="alert">{{ error }}</section>
+      {% endif %}
+
+      <section class="conversation-layout">
+        <aside class="panel sidebar-panel">
+          <h2>对话列表</h2>
+          <div class="conversation-list">
+            {% for item in conversations %}
+              <a
+                class="conversation-link {{ 'active' if item.id == conversation.id else '' }}"
+                href="/conversations/{{ item.id }}"
+              >
+                <span class="conversation-title">{{ item.title }}</span>
+                <span class="conversation-meta">{{ item.message_count }} 条消息</span>
+              </a>
+            {% endfor %}
+          </div>
+        </aside>
+
+        <section class="panel chat-panel">
+          <div class="panel-title-row">
+            <div>
+              <h2>消息流</h2>
+              <p class="muted">当前窗口会携带最近 20 条消息作为上下文。</p>
+            </div>
+            <form class="rename-form" action="/conversations/{{ conversation.id }}/rename" method="post">
+              <input
+                name="title"
+                type="text"
+                maxlength="80"
+                value="{{ conversation.title }}"
+                aria-label="对话标题"
+              >
+              <button class="secondary-button" type="submit">修改标题</button>
+            </form>
+          </div>
+
+          <dl class="meta-grid conversation-config">
+            <div>
+              <dt>模型</dt>
+              <dd>{{ conversation.model or "-" }}</dd>
+            </div>
+            <div>
+              <dt>模式</dt>
+              <dd>{{ conversation.api_mode or "-" }}</dd>
+            </div>
+            <div>
+              <dt>推理强度</dt>
+              <dd>{{ conversation.reasoning_effort or "-" }}</dd>
+            </div>
+          </dl>
+
+          <div class="message-list" data-message-list>
+            {% for message in messages %}
+              <article class="message {{ message.role }}">
+                <div class="message-header">
+                  <span>{{ "你" if message.role == "user" else "Agent" }}</span>
+                  <span>{{ message.created_at }}</span>
+                </div>
+                {% if message.error_message %}
+                  <p class="error-text">{{ message.error_message }}</p>
+                {% else %}
+                  <pre>{{ message.content }}</pre>
+                {% endif %}
+              </article>
+            {% endfor %}
+          </div>
+
+          <form class="chat-form" action="/conversations/{{ conversation.id }}/messages" method="post" data-run-form>
+            <label for="question">继续提问</label>
+            <p class="muted">系统会自动检索本地资料库；涉及学校、专业、就业、分数线等问题时还会尝试搜索增强。</p>
+            <textarea
+              id="question"
+              name="question"
+              required
+              rows="5"
+              placeholder="继续追问，系统会带上这个对话窗口里的上下文。"
+            ></textarea>
+            <div class="action-row">
+              <button type="submit" data-submit-button>发送</button>
+              <span class="form-status" id="form-status">待发送</span>
+            </div>
+          </form>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>

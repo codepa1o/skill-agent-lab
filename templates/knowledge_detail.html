@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ document.filename }} - Skill Agent Lab</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <script defer src="{{ url_for('static', path='app.js') }}"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">资料详情</p>
+          <h1>{{ document.filename }}</h1>
+        </div>
+        <div class="action-row">
+          <form action="/knowledge/{{ document.id }}/delete" method="post">
+            <button class="secondary-button" type="submit">删除资料</button>
+          </form>
+          <a class="nav-link" href="/knowledge">返回资料库</a>
+          <a class="nav-link" href="/">返回首页</a>
+        </div>
+      </header>
+
+      <section class="panel">
+        <h2>索引信息</h2>
+        <dl class="detail-list">
+          <dt>状态</dt>
+          <dd class="status {{ 'success' if document.status == 'ready' else 'failed' if document.status == 'failed' else '' }}">
+            {{ "就绪" if document.status == "ready" else "失败" if document.status == "failed" else "索引中" }}
+          </dd>
+          <dt>文件类型</dt>
+          <dd>{{ document.file_type }}</dd>
+          <dt>切片数量</dt>
+          <dd>{{ document.chunk_count }}</dd>
+          <dt>保存路径</dt>
+          <dd>{{ document.file_path }}</dd>
+          <dt>创建时间</dt>
+          <dd>{{ document.created_at }}</dd>
+          {% if document.error_message %}
+            <dt>错误信息</dt>
+            <dd class="error-text">{{ document.error_message }}</dd>
+          {% endif %}
+        </dl>
+      </section>
+
+      <section class="panel">
+        <h2>切片预览</h2>
+        {% if chunks %}
+          <div class="chunk-list">
+            {% for chunk in chunks[:20] %}
+              <article class="chunk-card">
+                <div class="message-header">
+                  <span>chunk #{{ chunk.chunk_index + 1 }}</span>
+                  <span>{{ "第 " ~ chunk.page_number ~ " 页" if chunk.page_number else "文本资料" }}</span>
+                </div>
+                <pre>{{ chunk.content }}</pre>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty">还没有可预览的切片。</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

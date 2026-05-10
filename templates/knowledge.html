@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>本地资料库 - Skill Agent Lab</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <script defer src="{{ url_for('static', path='app.js') }}"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">Knowledge Base</p>
+          <h1>本地资料库</h1>
+        </div>
+        <div class="action-row">
+          <a class="nav-link" href="/">返回首页</a>
+          <a class="nav-link" href="/runs">运行日志</a>
+          <a class="nav-link" href="/evals">评测中心</a>
+        </div>
+      </header>
+
+      <section class="notice">
+        上传 Markdown、TXT 或 PDF 后，系统会自动切分、生成向量并保存到 SQLite。后续对话会自动检索本地资料并在回答末尾展示来源。
+      </section>
+
+      {% if error %}
+        <section class="alert">{{ error }}</section>
+      {% endif %}
+
+      <section class="panel">
+        <div class="panel-title-row">
+          <h2>上传资料</h2>
+          <span class="form-status" id="form-status">待上传</span>
+        </div>
+        <form class="run-form" action="/knowledge/upload" method="post" enctype="multipart/form-data" data-run-form>
+          <label for="file">资料文件</label>
+          <input id="file" name="file" type="file" accept=".md,.markdown,.txt,.pdf" required>
+          <button type="submit" data-submit-button>上传并索引</button>
+        </form>
+      </section>
+
+      <section class="panel">
+        <div class="panel-title-row">
+          <h2>已上传资料</h2>
+          <span class="muted">{{ documents|length }} 个文档</span>
+        </div>
+        {% if documents %}
+          <div class="knowledge-list">
+            {% for document in documents %}
+              <article class="knowledge-card">
+                <a class="knowledge-main" href="/knowledge/{{ document.id }}">
+                  <span class="conversation-title">{{ document.filename }}</span>
+                  <span class="conversation-meta">
+                    {{ document.file_type }} · {{ document.chunk_count }} 个切片 · {{ document.created_at }}
+                  </span>
+                </a>
+                <span class="status {{ 'success' if document.status == 'ready' else 'failed' if document.status == 'failed' else '' }}">
+                  {{ "就绪" if document.status == "ready" else "失败" if document.status == "failed" else "索引中" }}
+                </span>
+                <form action="/knowledge/{{ document.id }}/delete" method="post">
+                  <button class="icon-button" type="submit">删除</button>
+                </form>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty">还没有本地资料。</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

@@ -12,7 +12,7 @@
       <header class="app-header">
         <div>
           <p class="eyebrow">Skill Agent Lab</p>
-          <h1>GitHub Skill 角色测试台</h1>
+          <h1>多轮 Skill 对话</h1>
         </div>
         <div class="runtime-pills">
           <span class="model-pill">模型 {{ default_model }}</span>
@@ -20,107 +20,89 @@
           {% if reasoning_effort %}
             <span class="model-pill">推理 {{ reasoning_effort }}</span>
           {% endif %}
-          {% if base_url %}
-            <span class="model-pill">Base URL {{ base_url }}</span>
-          {% endif %}
-          <a class="nav-link" href="/runs">历史记录</a>
+          <a class="nav-link" href="/runs">运行日志</a>
+          <a class="nav-link" href="/evals">评测中心</a>
+          <a class="nav-link" href="/knowledge">本地资料库</a>
         </div>
       </header>
 
       <section class="notice">
-        这是基于 Skill 的角色模拟与测试，不代表真实人物、机构或官方建议。
+        每个对话窗口都有独立上下文记忆。系统会自动尝试本地资料库 RAG；涉及学校、专业、就业、分数线等问题时还会尝试搜索增强，并展示来源链接。
       </section>
 
       {% if error %}
         <section class="alert">{{ error }}</section>
       {% endif %}
 
-      <section class="panel">
-        <div class="panel-title-row">
-          <h2>新建测试</h2>
-          <span class="form-status" id="form-status">待运行</span>
-        </div>
-        <form class="run-form" action="/runs" method="post" data-run-form>
-          <label for="skill_url">GitHub Skill URL</label>
-          <input
-            id="skill_url"
-            name="skill_url"
-            type="url"
-            required
-            value="{{ selected_run.skill_url if selected_run else default_skill_url }}"
-            placeholder="https://github.com/owner/repo/blob/main/SKILL.md"
-          >
+      <section class="conversation-layout">
+        <aside class="panel sidebar-panel">
+          <div class="panel-title-row">
+            <h2>对话列表</h2>
+            <span class="muted">{{ conversations|length }} 个</span>
+          </div>
+          {% if conversations %}
+            <div class="conversation-list">
+              {% for conversation in conversations %}
+                <a class="conversation-link" href="/conversations/{{ conversation.id }}">
+                  <span class="conversation-title">{{ conversation.title }}</span>
+                  <span class="conversation-meta">
+                    {{ conversation.message_count }} 条消息 · {{ conversation.updated_at }}
+                  </span>
+                </a>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="empty">还没有对话，先创建一个。</p>
+          {% endif %}
+        </aside>
 
-          <label for="question">测试问题</label>
-          <textarea
-            id="question"
-            name="question"
-            required
-            rows="7"
-            placeholder="例如：我是浙江考生，617 分，普通家庭，想学计算机，靠谱吗？建议我报什么学校？"
-          >{{ selected_run.question if selected_run else "" }}</textarea>
+        <section class="panel">
+          <div class="panel-title-row">
+            <h2>新建对话</h2>
+            <span class="form-status" id="form-status">待运行</span>
+          </div>
+          <form class="run-form" action="/conversations" method="post" data-run-form>
+            <label for="title">对话标题</label>
+            <input
+              id="title"
+              name="title"
+              type="text"
+              maxlength="80"
+              placeholder="不填则使用第一条问题自动生成"
+            >
 
-          <button type="submit" data-submit-button>运行测试</button>
-        </form>
+            <label for="skill_url">GitHub Skill URL</label>
+            <input
+              id="skill_url"
+              name="skill_url"
+              type="url"
+              required
+              value="{{ default_skill_url }}"
+              placeholder="https://github.com/owner/repo/blob/main/SKILL.md"
+            >
+
+            <label for="question">第一条消息</label>
+            <textarea
+              id="question"
+              name="question"
+              required
+              rows="7"
+              placeholder="例如：我是浙江考生，617 分，普通家庭，想学计算机，靠谱吗？建议我报什么学校？"
+            ></textarea>
+
+            <button type="submit" data-submit-button>创建并发送</button>
+          </form>
+        </section>
       </section>
 
-      {% if selected_run %}
-        <section class="panel result-panel">
-          <div class="panel-title-row">
-            <h2>本次结果</h2>
-            <div class="action-row">
-              <form action="/runs/{{ selected_run.id }}/rerun" method="post" data-rerun-form>
-                <button class="secondary-button" type="submit">重新运行</button>
-              </form>
-              <a href="/runs/{{ selected_run.id }}">查看详情</a>
-            </div>
-          </div>
-          <dl class="meta-grid wide">
-            <div>
-              <dt>状态</dt>
-              <dd class="status {{ selected_run.status }}">{{ "成功" if selected_run.status == "success" else "失败" }}</dd>
-            </div>
-            <div>
-              <dt>模型</dt>
-              <dd>{{ selected_run.model or "-" }}</dd>
-            </div>
-            <div>
-              <dt>模式</dt>
-              <dd>{{ selected_run.api_mode or "-" }}</dd>
-            </div>
-            <div>
-              <dt>推理强度</dt>
-              <dd>{{ selected_run.reasoning_effort or "-" }}</dd>
-            </div>
-            <div>
-              <dt>耗时</dt>
-              <dd>{{ selected_run.latency_ms }} ms</dd>
-            </div>
-            <div>
-              <dt>时间</dt>
-              <dd>{{ selected_run.created_at }}</dd>
-            </div>
-          </dl>
-          <h3>问题</h3>
-          <p class="question">{{ selected_run.question }}</p>
-          {% if selected_run.status == "success" %}
-            <h3>回答</h3>
-            <pre class="answer">{{ selected_run.answer }}</pre>
-          {% else %}
-            <h3>错误</h3>
-            <p class="error-text">{{ selected_run.error_message }}</p>
-          {% endif %}
-        </section>
-      {% endif %}
-
       <section class="panel">
         <div class="panel-title-row">
-          <h2>最近测试记录</h2>
-          <span class="muted">{{ runs|length }} 条</span>
+          <h2>最近运行日志</h2>
+          <a href="/runs">查看全部</a>
         </div>
         {% if runs %}
           <div class="run-list">
-            {% for run in runs %}
+            {% for run in runs[:5] %}
               <article class="run-item-card">
                 <a class="run-main" href="/runs/{{ run.id }}">
                   <span class="run-status {{ run.status }}">{{ "成功" if run.status == "success" else "失败" }}</span>
@@ -130,16 +112,12 @@
                   <span>{{ run.model or "-" }}</span>
                   <span>{{ run.api_mode or "-" }}</span>
                   <span>{{ run.latency_ms }} ms</span>
-                  <span>{{ run.created_at }}</span>
                 </div>
-                <form action="/runs/{{ run.id }}/rerun" method="post" data-rerun-form>
-                  <button class="icon-button" type="submit">重新运行</button>
-                </form>
               </article>
             {% endfor %}
           </div>
         {% else %}
-          <p class="empty">还没有测试记录。</p>
+          <p class="empty">还没有运行日志。</p>
         {% endif %}
       </section>
     </main>

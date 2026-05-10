@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>评测中心 - Skill Agent Lab</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <script defer src="{{ url_for('static', path='app.js') }}"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">评测中心</p>
+          <h1>测试集与 Judge 评分</h1>
+        </div>
+        <a class="nav-link" href="/">返回对话</a>
+      </header>
+
+      {% if error %}
+        <section class="alert">{{ error }}</section>
+      {% endif %}
+
+      <section class="conversation-layout">
+        <section class="panel">
+          <h2>测试集</h2>
+          {% if suites %}
+            <div class="conversation-list">
+              {% for suite in suites %}
+                <a class="conversation-link" href="/evals/suites/{{ suite.id }}">
+                  <span class="conversation-title">{{ suite.name }}</span>
+                  <span class="conversation-meta">{{ suite.case_count }} 个测试用例</span>
+                </a>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="empty">还没有测试集。</p>
+          {% endif %}
+        </section>
+
+        <section class="panel">
+          <h2>创建测试集</h2>
+          <form class="run-form" action="/evals/suites" method="post">
+            <label for="name">名称</label>
+            <input id="name" name="name" required placeholder="例如：张雪峰 Skill 进阶评测集">
+            <label for="skill_url">Skill URL</label>
+            <input id="skill_url" name="skill_url" type="url" required placeholder="https://github.com/owner/repo/blob/main/SKILL.md">
+            <label for="description">描述</label>
+            <textarea id="description" name="description" rows="4" placeholder="这个测试集覆盖哪些能力和场景？"></textarea>
+            <button type="submit">创建测试集</button>
+          </form>
+        </section>
+      </section>
+
+      <section class="panel">
+        <h2>最近评测运行</h2>
+        {% if eval_runs %}
+          <div class="history-table">
+            <div class="history-head eval-head">
+              <span>状态</span>
+              <span>测试集</span>
+              <span>平均分</span>
+              <span>时间</span>
+              <span>操作</span>
+            </div>
+            {% for run in eval_runs %}
+              <div class="history-row eval-row">
+                <span class="status {{ 'success' if run.status == 'completed' else 'failed' }}">{{ run.status }}</span>
+                <span>{{ run.suite_name }}</span>
+                <span>{{ run.average_score }}</span>
+                <span>{{ run.created_at }}</span>
+                <a href="/evals/runs/{{ run.id }}">查看报告</a>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty">还没有评测运行。</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

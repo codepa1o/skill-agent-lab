@@ -20,3 +20,9 @@ for (const form of document.querySelectorAll("[data-rerun-form]")) {
     }
   });
 }
+
+const messageList = document.querySelector("[data-message-list]");
+
+if (messageList) {
+  messageList.scrollTop = messageList.scrollHeight;
+}

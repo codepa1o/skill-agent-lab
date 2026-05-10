@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>评测报告 #{{ eval_run.id }} - Skill Agent Lab</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">对照评测报告</p>
+          <h1>{{ eval_run.suite_name }}</h1>
+        </div>
+        <a class="nav-link" href="/evals">返回评测中心</a>
+      </header>
+
+      <section class="notice">
+        每个测试用例会生成两次回答：baseline 不使用搜索/RAG，enhanced 使用本地资料库和搜索增强。Judge 会分别评分，并额外评价来源引用质量。
+      </section>
+
+      <section class="panel">
+        <dl class="meta-grid">
+          <div>
+            <dt>状态</dt>
+            <dd>{{ eval_run.status }}</dd>
+          </div>
+          <div>
+            <dt>增强平均分</dt>
+            <dd>{{ eval_run.average_score }}</dd>
+          </div>
+          <div>
+            <dt>时间</dt>
+            <dd>{{ eval_run.created_at }}</dd>
+          </div>
+        </dl>
+        {% if eval_run.error_message %}
+          <p class="error-text">{{ eval_run.error_message }}</p>
+        {% endif %}
+      </section>
+
+      <section class="panel">
+        <h2>对照结果</h2>
+        {% if result_groups %}
+          <div class="eval-result-list">
+            {% for group in result_groups %}
+              <article class="eval-card">
+                <div class="panel-title-row">
+                  <div>
+                    <h3>{{ group.title }}</h3>
+                    <p class="question">{{ group.question }}</p>
+                  </div>
+                  <span class="score-pill">差值 {{ "%+.2f"|format(group.delta) }}</span>
+                </div>
+
+                <div class="comparison-grid">
+                  {% for variant_key, variant_name in [("baseline", "Baseline 不增强"), ("enhanced", "Enhanced 搜索/RAG")] %}
+                    {% set result = group[variant_key] %}
+                    <section class="comparison-card">
+                      <div class="panel-title-row">
+                        <h4>{{ variant_name }}</h4>
+                        {% if result %}
+                          <span class="score-pill">总分 {{ result.overall }}</span>
+                        {% endif %}
+                      </div>
+                      {% if not result %}
+                        <p class="empty">没有生成该版本结果。</p>
+                      {% elif result.error_message %}
+                        <p class="error-text">{{ result.error_message }}</p>
+                      {% else %}
+                        <dl class="score-grid compact">
+                          <div><dt>角色</dt><dd>{{ result.role_adherence }}</dd></div>
+                          <div><dt>约束</dt><dd>{{ result.constraint_adherence }}</dd></div>
+                          <div><dt>完成</dt><dd>{{ result.task_completion }}</dd></div>
+                          <div><dt>事实</dt><dd>{{ result.factual_safety }}</dd></div>
+                          <div><dt>格式</dt><dd>{{ result.format_quality }}</dd></div>
+                          <div><dt>来源</dt><dd>{{ result.source_usage }}</dd></div>
+                        </dl>
+                        <div class="run-meta">
+                          <span>搜索 {{ "是" if result.search_used else "否" }}</span>
+                          <span>RAG {{ "是" if result.rag_used else "否" }}</span>
+                        </div>
+                        <h4>回答</h4>
+                        <pre class="answer">{{ result.agent_answer }}</pre>
+                        {% if result.search_results or result.rag_results %}
+                          <h4>命中来源</h4>
+                          <pre class="answer">{{ result.rag_results }}{% if result.rag_results and result.search_results %}
+
+{% endif %}{{ result.search_results }}</pre>
+                        {% endif %}
+                        <h4>Judge 评语</h4>
+                        <p>{{ result.judge_comment }}</p>
+                      {% endif %}
+                    </section>
+                  {% endfor %}
+                </div>
+              </article>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="empty">没有评测结果。</p>
+        {% endif %}
+      </section>
+    </main>
+  </body>
+</html>

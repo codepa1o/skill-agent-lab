@@ -39,6 +39,10 @@
           <dd>{{ run.base_url or "-" }}</dd>
           <dt>推理强度</dt>
           <dd>{{ run.reasoning_effort or "-" }}</dd>
+          <dt>搜索增强</dt>
+          <dd>{{ "已使用" if run.search_used else "未使用" }}</dd>
+          <dt>本地资料库</dt>
+          <dd>{{ "已命中" if run.rag_used else "未命中" }}</dd>
           <dt>耗时</dt>
           <dd>{{ run.latency_ms }} ms</dd>
           <dt>创建时间</dt>
@@ -64,6 +68,20 @@
           <p class="error-text">{{ run.error_message }}</p>
         {% endif %}
       </section>
+
+      {% if run.search_results %}
+        <section class="panel">
+          <h2>搜索资料</h2>
+          <pre class="answer">{{ run.search_results }}</pre>
+        </section>
+      {% endif %}
+
+      {% if run.rag_results %}
+        <section class="panel">
+          <h2>本地资料命中</h2>
+          <pre class="answer">{{ run.rag_results }}</pre>
+        </section>
+      {% endif %}
     </main>
   </body>
 </html>

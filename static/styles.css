@@ -426,6 +426,243 @@ dd {
   padding: 12px;
 }
 
+.conversation-layout {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.conversation-shell {
+  min-height: 100vh;
+}
+
+.sidebar-panel {
+  position: sticky;
+  top: 16px;
+}
+
+.conversation-list {
+  display: grid;
+  gap: 10px;
+}
+
+.conversation-link {
+  display: grid;
+  gap: 6px;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f9fbfd;
+  color: #18202f;
+}
+
+.conversation-link:hover,
+.conversation-link.active {
+  border-color: #bad0e3;
+  background: #eef7fd;
+  text-decoration: none;
+}
+
+.conversation-title {
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.conversation-meta {
+  color: #66758a;
+  font-size: 13px;
+}
+
+.chat-panel {
+  display: flex;
+  min-width: 0;
+  max-height: calc(100vh - 126px);
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.rename-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto;
+  gap: 8px;
+  width: min(420px, 100%);
+}
+
+.conversation-config {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 18px;
+}
+
+.message-list {
+  display: grid;
+  gap: 14px;
+  flex: 1;
+  margin-bottom: 18px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.message {
+  max-width: 88%;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  padding: 12px 14px;
+  background: #f9fbfd;
+}
+
+.message.user {
+  justify-self: end;
+  border-color: #c8dced;
+  background: #eef7fd;
+}
+
+.message.assistant {
+  justify-self: start;
+}
+
+.message-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  color: #66758a;
+  font-size: 13px;
+}
+
+.message pre {
+  margin: 0;
+  color: #18202f;
+  font: inherit;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.chat-form {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #e1e7ef;
+  margin: 0 -22px -22px;
+  padding-top: 16px;
+  padding: 16px 22px 22px;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.chat-form textarea {
+  min-height: 110px;
+}
+
+.case-list,
+.eval-result-list,
+.knowledge-list,
+.chunk-list {
+  display: grid;
+  gap: 14px;
+}
+
+.case-card,
+.eval-card,
+.knowledge-card,
+.chunk-card {
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  padding: 14px;
+  background: #f9fbfd;
+}
+
+.knowledge-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 70px auto;
+  align-items: center;
+  gap: 12px;
+}
+
+.knowledge-main {
+  display: grid;
+  gap: 6px;
+  color: #18202f;
+}
+
+.knowledge-main:hover {
+  text-decoration: none;
+}
+
+.chunk-card pre {
+  margin: 0;
+  color: #18202f;
+  font: inherit;
+  line-height: 1.7;
+  white-space: pre-wrap;
+}
+
+.case-card h3,
+.eval-card h3 {
+  margin-top: 0;
+}
+
+.case-meta {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+}
+
+.case-meta dd {
+  margin-bottom: 8px;
+}
+
+.score-pill {
+  border: 1px solid #c8dced;
+  border-radius: 8px;
+  padding: 6px 10px;
+  color: #185f9c;
+  background: #eef7fd;
+  font-weight: 700;
+}
+
+.score-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.score-grid.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.score-grid div {
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  padding: 10px;
+  background: #ffffff;
+}
+
+.eval-head,
+.eval-row {
+  grid-template-columns: 90px minmax(220px, 1fr) 90px 220px 100px;
+}
+
+.comparison-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.comparison-card {
+  min-width: 0;
+  border: 1px solid #e1e7ef;
+  border-radius: 8px;
+  padding: 14px;
+  background: #ffffff;
+}
+
+h4 {
+  margin: 18px 0 8px;
+}
+
 @media (max-width: 760px) {
   .shell {
     width: min(100% - 20px, 1120px);
@@ -442,10 +679,33 @@ dd {
   .run-item,
   .run-item-card,
   .run-main,
-  .history-head,
-  .history-row,
-  .detail-list {
+  .conversation-layout,
+  .conversation-config,
+  .rename-form,
+    .history-head,
+    .history-row,
+    .knowledge-card,
+    .score-grid,
+    .comparison-grid,
+    .detail-list {
     grid-template-columns: 1fr;
+  }
+
+  .sidebar-panel {
+    position: static;
+  }
+
+  .chat-panel {
+    max-height: none;
+    overflow: visible;
+  }
+
+  .message-list {
+    max-height: 58vh;
+  }
+
+  .message {
+    max-width: 100%;
   }
 
   .history-head {

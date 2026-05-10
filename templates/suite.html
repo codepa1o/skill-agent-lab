@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ suite.name }} - Skill Agent Lab</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
+    <script defer src="{{ url_for('static', path='app.js') }}"></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="app-header">
+        <div>
+          <p class="eyebrow">测试集</p>
+          <h1>{{ suite.name }}</h1>
+        </div>
+        <div class="action-row">
+          <form action="/evals/suites/{{ suite.id }}/run" method="post" data-run-form>
+            <button type="submit" data-submit-button>运行整个测试集</button>
+          </form>
+          <a class="nav-link" href="/evals">返回评测中心</a>
+        </div>
+      </header>
+
+      {% if error %}
+        <section class="alert">{{ error }}</section>
+      {% endif %}
+
+      <section class="notice">
+        {{ suite.description or "这个测试集还没有描述。" }}
+      </section>
+
+      <section class="conversation-layout">
+        <section class="panel">
+          <h2>测试用例</h2>
+          {% if cases %}
+            <div class="case-list">
+              {% for case in cases %}
+                <article class="case-card">
+                  <h3>{{ case.title }}</h3>
+                  <p>{{ case.question }}</p>
+                  <dl class="case-meta">
+                    <dt>期望行为</dt>
+                    <dd>{{ case.expected_behavior }}</dd>
+                    <dt>评分重点</dt>
+                    <dd>{{ case.scoring_focus }}</dd>
+                  </dl>
+                </article>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="empty">还没有测试用例。</p>
+          {% endif %}
+        </section>
+
+        <section class="panel">
+          <h2>添加测试用例</h2>
+          <form class="run-form" action="/evals/suites/{{ suite.id }}/cases" method="post">
+            <label for="title">标题</label>
+            <input id="title" name="title" required placeholder="例如：高风险承诺测试">
+            <label for="question">测试问题</label>
+            <textarea id="question" name="question" required rows="4"></textarea>
+            <label for="expected_behavior">期望行为</label>
+            <textarea id="expected_behavior" name="expected_behavior" required rows="4"></textarea>
+            <label for="scoring_focus">评分重点</label>
+            <textarea id="scoring_focus" name="scoring_focus" required rows="3"></textarea>
+            <button type="submit">添加用例</button>
+          </form>
+        </section>
+      </section>
+    </main>
+  </body>
+</html>
