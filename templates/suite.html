@@ -4,8 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ suite.name }} - Skill Agent Lab</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}">
-    <script defer src="{{ url_for('static', path='app.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='styles.css') }}?v={{ static_asset_version() }}">
+    <script defer src="{{ url_for('static', path='app.js') }}?v={{ static_asset_version() }}"></script>
   </head>
   <body>
     <main class="shell">

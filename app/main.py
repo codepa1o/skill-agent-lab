@@ -1,9 +1,12 @@
+import json
+import time
+from collections.abc import AsyncIterator
 from pathlib import Path
 from urllib.parse import quote
 
 from dotenv import load_dotenv
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -15,6 +18,8 @@ from app.agent_runner import (
     get_reasoning_effort,
     run_skill_agent_chat,
     run_skill_agent,
+    stream_skill_agent_chat,
+    summarize_conversation_memory,
 )
 from app.default_data import ensure_default_test_suites
 from app.diagnostics import build_diagnostics
@@ -26,6 +31,7 @@ from app.run_store import (
     create_job,
     create_message,
     create_run,
+    get_message,
     get_conversation,
     get_run,
     get_eval_run,
@@ -46,6 +52,8 @@ from app.run_store import (
     rename_conversation,
     create_test_case,
     create_test_suite,
+    update_conversation_memory,
+    update_message,
     update_rag_document,
 )
 from app.rag_service import (
@@ -65,16 +73,34 @@ from app.search_service import (
     search_if_needed,
     serialize_results,
 )
-from app.skill_loader import DEFAULT_SKILL_URL, SkillLoadError, load_skill
+from app.skill_loader import DEFAULT_SKILL_URL, SkillLoadError, github_url_to_raw_url, load_skill
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+SHORT_TERM_MESSAGE_LIMIT = 12
+LONG_CONTEXT_MESSAGE_LIMIT = 20
+CONTEXT_CHAR_LIMIT = 12000
+STREAM_DB_FLUSH_CHARS = 240
 
 load_dotenv(BASE_DIR / ".env")
 
 app = FastAPI(title="Skill Agent Lab")
 app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
 templates = Jinja2Templates(directory=BASE_DIR / "templates")
+
+
+def static_asset_version() -> str:
+    try:
+        latest_mtime = max(
+            (BASE_DIR / "static" / "app.js").stat().st_mtime,
+            (BASE_DIR / "static" / "styles.css").stat().st_mtime,
+        )
+    except OSError:
+        return "1"
+    return str(int(latest_mtime))
+
+
+templates.env.globals["static_asset_version"] = static_asset_version
 
 
 @app.on_event("startup")
@@ -124,7 +150,7 @@ async def create_conversation_endpoint(
         )
 
     try:
-        loaded_skill = await load_skill(cleaned_skill_url)
+        raw_url = github_url_to_raw_url(cleaned_skill_url)
     except SkillLoadError as exc:
         create_run(
             skill_url=cleaned_skill_url,
@@ -142,8 +168,8 @@ async def create_conversation_endpoint(
 
     conversation_id = create_conversation(
         title=normalize_title(title, cleaned_question),
-        skill_url=loaded_skill.skill_url,
-        raw_url=loaded_skill.raw_url,
+        skill_url=cleaned_skill_url,
+        raw_url=raw_url,
         model=get_model_name(),
         api_mode=get_api_mode(),
         base_url=get_base_url(),
@@ -154,15 +180,10 @@ async def create_conversation_endpoint(
         role="user",
         content=cleaned_question,
     )
-
-    try:
-        await answer_conversation_message(conversation_id, loaded_skill.content, loaded_skill.raw_url)
-    except AgentRunError as exc:
-        return RedirectResponse(
-            url=f"/conversations/{conversation_id}?error={quote(friendly_error_message(str(exc)))}",
-            status_code=303,
-        )
-    return RedirectResponse(url=f"/conversations/{conversation_id}", status_code=303)
+    return RedirectResponse(
+        url=f"/conversations/{conversation_id}?autostart=1",
+        status_code=303,
+    )
 
 
 @app.get("/conversations/{conversation_id}", response_class=HTMLResponse)
@@ -170,18 +191,31 @@ async def conversation_detail(
     request: Request,
     conversation_id: int,
     error: str = "",
+    autostart: str = "",
 ):
     conversation = get_conversation(conversation_id)
     if not conversation:
         raise HTTPException(status_code=404, detail="Conversation not found")
+    messages = list_messages(conversation_id)
+    latest_user_message_id = next(
+        (message.id for message in reversed(messages) if message.role == "user"),
+        None,
+    )
+    should_autostart = (
+        latest_user_message_id is not None
+        and not has_terminal_assistant_after_user(messages, latest_user_message_id)
+        and (autostart == "1" or latest_user_needs_answer(messages, latest_user_message_id))
+    )
     return templates.TemplateResponse(
         request,
         "conversation.html",
         {
             "conversation": conversation,
             "conversations": list_conversations(),
-            "messages": list_messages(conversation_id),
+            "messages": messages,
             "error": error,
+            "autostart": should_autostart,
+            "latest_user_message_id": latest_user_message_id,
         },
     )
 
@@ -202,19 +236,8 @@ async def append_conversation_message(
             status_code=303,
         )
 
-    create_message(
-        conversation_id=conversation_id,
-        role="user",
-        content=cleaned_question,
-    )
-
     try:
-        loaded_skill = await load_skill(conversation.skill_url)
-        await answer_conversation_message(
-            conversation_id,
-            loaded_skill.content,
-            loaded_skill.raw_url,
-        )
+        await create_and_answer_conversation_message(conversation_id, cleaned_question)
     except SkillLoadError as exc:
         error_message = friendly_error_message(str(exc))
         create_message(
@@ -245,6 +268,42 @@ async def append_conversation_message(
         )
 
     return RedirectResponse(url=f"/conversations/{conversation_id}", status_code=303)
+
+
+@app.post("/conversations/{conversation_id}/messages/stream")
+async def stream_conversation_message(
+    conversation_id: int,
+    question: str | None = Form(None),
+    message_id: int | None = Form(None),
+):
+    conversation = get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    cleaned_question = question.strip() if question is not None else ""
+    existing_user_message_id = None
+    if message_id is not None:
+        existing_message = get_message(message_id, conversation_id)
+        if not existing_message or existing_message.role != "user":
+            raise HTTPException(status_code=404, detail="Message not found")
+        cleaned_question = existing_message.content.strip()
+        existing_user_message_id = existing_message.id
+
+    if not cleaned_question:
+        raise HTTPException(status_code=400, detail="Question cannot be empty")
+
+    return StreamingResponse(
+        stream_answer_events(
+            conversation_id,
+            cleaned_question,
+            existing_user_message_id=existing_user_message_id,
+        ),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
 
 
 @app.post("/conversations/{conversation_id}/rename")
@@ -608,7 +667,10 @@ async def answer_conversation_message(
         raise HTTPException(status_code=404, detail="Conversation not found")
 
     messages = list_messages(conversation_id)
-    history = conversation_history_for_model(messages)
+    history = conversation_history_for_model(
+        messages,
+        memory_summary=conversation.memory_summary,
+    )
     latest_user_message = next(
         (message.content for message in reversed(messages) if message.role == "user"),
         "",
@@ -651,6 +713,7 @@ async def answer_conversation_message(
             status="success",
             latency_ms=result.latency_ms,
         )
+        maybe_compress_conversation_memory(conversation_id)
     except AgentRunError as exc:
         error_message = friendly_error_message(str(exc))
         create_message(
@@ -673,17 +736,307 @@ async def answer_conversation_message(
         raise AgentRunError(error_message) from exc
 
 
-def conversation_history_for_model(messages) -> list[dict[str, str]]:
+async def create_and_answer_conversation_message(
+    conversation_id: int,
+    question: str,
+) -> None:
+    conversation = get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    create_message(
+        conversation_id=conversation_id,
+        role="user",
+        content=question,
+    )
+    loaded_skill = await load_skill(conversation.skill_url)
+    await answer_conversation_message(
+        conversation_id,
+        loaded_skill.content,
+        loaded_skill.raw_url,
+    )
+
+
+async def stream_answer_events(
+    conversation_id: int,
+    question: str,
+    existing_user_message_id: int | None = None,
+) -> AsyncIterator[str]:
+    existing_assistant_message = None
+    if existing_user_message_id is None:
+        user_message_id = create_message(
+            conversation_id=conversation_id,
+            role="user",
+            content=question,
+        )
+    else:
+        user_message_id = existing_user_message_id
+        existing_assistant_message = completed_assistant_after_user(
+            list_messages(conversation_id),
+            user_message_id,
+        )
+    if existing_assistant_message:
+        yield sse_event(
+            "message",
+            {
+                "id": user_message_id,
+                "role": "user",
+                "content": question,
+                "status": "complete",
+            },
+        )
+        yield sse_event(
+            "message",
+            {
+                "id": existing_assistant_message.id,
+                "role": "assistant",
+                "content": "",
+                "status": "streaming",
+            },
+        )
+        yield sse_event("delta", {"content": existing_assistant_message.content})
+        yield sse_event(
+            "done",
+            {
+                "content": existing_assistant_message.content,
+                "latency_ms": existing_assistant_message.latency_ms,
+                "message_id": existing_assistant_message.id,
+            },
+        )
+        return
+    assistant_message_id = create_message(
+        conversation_id=conversation_id,
+        role="assistant",
+        content="",
+        status="streaming",
+    )
+    yield sse_event(
+        "message",
+        {
+            "id": user_message_id,
+            "role": "user",
+            "content": question,
+            "status": "complete",
+        },
+    )
+    yield sse_event(
+        "message",
+        {
+            "id": assistant_message_id,
+            "role": "assistant",
+            "content": "",
+            "status": "streaming",
+        },
+    )
+
+    conversation = get_conversation(conversation_id)
+    if not conversation:
+        yield sse_event("error", {"message": "Conversation not found"})
+        return
+
+    started_at = time.perf_counter()
+    chunks: list[str] = []
+    last_saved_length = 0
+    latest_user_message = question
+    rag_bundle = None
+    search_bundle = None
+
+    try:
+        loaded_skill = await load_skill(conversation.skill_url)
+        rag_bundle = retrieve_local_context(latest_user_message)
+        search_bundle = await search_if_needed(latest_user_message)
+        messages = list_messages(conversation_id)
+        history = conversation_history_for_model(
+            messages,
+            memory_summary=conversation.memory_summary,
+        )
+        augmented_skill = augment_skill_with_search(
+            augment_skill_with_rag(
+                loaded_skill.content,
+                build_rag_context(rag_bundle),
+            ),
+            build_search_context(search_bundle),
+        )
+        async for delta in stream_skill_agent_chat(augmented_skill, history):
+            chunks.append(delta)
+            yield sse_event("delta", {"content": delta})
+            current_answer = "".join(chunks)
+            if len(current_answer) - last_saved_length >= STREAM_DB_FLUSH_CHARS:
+                update_message(
+                    assistant_message_id,
+                    conversation_id=conversation_id,
+                    content=current_answer,
+                    status="streaming",
+                )
+                last_saved_length = len(current_answer)
+
+        answer = append_sources(
+            append_rag_sources("".join(chunks), rag_bundle),
+            search_bundle,
+        )
+        latency_ms = int((time.perf_counter() - started_at) * 1000)
+        update_message(
+            assistant_message_id,
+            conversation_id=conversation_id,
+            content=answer,
+            status="complete",
+            latency_ms=latency_ms,
+            error_message="",
+        )
+        create_run(
+            skill_url=conversation.skill_url,
+            raw_url=loaded_skill.raw_url,
+            question=latest_user_message,
+            answer=answer,
+            model=get_model_name(),
+            api_mode=get_api_mode(),
+            base_url=get_base_url(),
+            reasoning_effort=get_reasoning_effort(),
+            search_used=1 if search_bundle.needed else 0,
+            search_results=serialize_results(search_bundle),
+            rag_used=1 if rag_bundle.used else 0,
+            rag_results=serialize_rag_results(rag_bundle),
+            status="success",
+            latency_ms=latency_ms,
+        )
+        maybe_compress_conversation_memory(conversation_id)
+        yield sse_event(
+            "done",
+            {
+                "content": answer,
+                "latency_ms": latency_ms,
+                "message_id": assistant_message_id,
+            },
+        )
+    except (SkillLoadError, AgentRunError) as exc:
+        error_message = friendly_error_message(str(exc))
+        update_message(
+            assistant_message_id,
+            conversation_id=conversation_id,
+            content="".join(chunks),
+            status="failed",
+            error_message=error_message,
+        )
+        create_run(
+            skill_url=conversation.skill_url,
+            raw_url=conversation.raw_url,
+            question=latest_user_message,
+            answer="".join(chunks),
+            model=get_model_name(),
+            api_mode=get_api_mode(),
+            base_url=get_base_url(),
+            reasoning_effort=get_reasoning_effort(),
+            search_used=1 if search_bundle and search_bundle.needed else 0,
+            search_results=serialize_results(search_bundle) if search_bundle else "",
+            rag_used=1 if rag_bundle and rag_bundle.used else 0,
+            rag_results=serialize_rag_results(rag_bundle) if rag_bundle else "",
+            status="failed",
+            error_message=error_message,
+        )
+        yield sse_event("error", {"message": error_message})
+
+
+def sse_event(event: str, payload: dict[str, object]) -> str:
+    return f"event: {event}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
+
+
+def latest_user_needs_answer(messages, user_message_id: int) -> bool:
+    return next_message_after_user(messages, user_message_id) is None
+
+
+def has_terminal_assistant_after_user(messages, user_message_id: int) -> bool:
+    next_message = next_message_after_user(messages, user_message_id)
+    return bool(next_message and next_message.role == "assistant" and next_message.status in {"complete", "failed"})
+
+
+def next_message_after_user(messages, user_message_id: int):
+    return next((message for message in messages if message.id > user_message_id), None)
+
+
+def completed_assistant_after_user(messages, user_message_id: int):
+    next_message = next_message_after_user(messages, user_message_id)
+    if next_message and next_message.role == "assistant" and next_message.status == "complete":
+        return next_message
+    return None
+
+
+def conversation_history_for_model(
+    messages,
+    memory_summary: str = "",
+) -> list[dict[str, str]]:
     useful_messages = [
         message
         for message in messages
-        if message.role in {"user", "assistant"} and message.content.strip()
+        if (
+            message.role in {"user", "assistant"}
+            and message.status != "failed"
+            and message.content.strip()
+        )
     ]
-    recent_messages = useful_messages[-20:]
-    return [
+    recent_messages = useful_messages[-SHORT_TERM_MESSAGE_LIMIT:]
+    history = [
         {"role": message.role, "content": message.content}
         for message in recent_messages
     ]
+    if memory_summary.strip():
+        history.insert(
+            0,
+            {
+                "role": "system",
+                "content": (
+                    "Long-term memory summary from earlier in this conversation:\n"
+                    f"{memory_summary.strip()}"
+                ),
+            },
+        )
+    return history
+
+
+def maybe_compress_conversation_memory(conversation_id: int) -> None:
+    conversation = get_conversation(conversation_id)
+    if not conversation:
+        return
+    messages = [
+        message
+        for message in list_messages(conversation_id)
+        if (
+            message.role in {"user", "assistant"}
+            and message.status != "failed"
+            and message.content.strip()
+        )
+    ]
+    if len(messages) <= LONG_CONTEXT_MESSAGE_LIMIT and total_message_chars(messages) <= CONTEXT_CHAR_LIMIT:
+        return
+
+    preserve_count = max(2, SHORT_TERM_MESSAGE_LIMIT)
+    candidates = [
+        message
+        for message in messages[:-preserve_count]
+        if message.id > conversation.memory_last_message_id
+    ]
+    if not candidates:
+        return
+
+    try:
+        summary_result = summarize_conversation_memory(
+            existing_summary=conversation.memory_summary,
+            messages=[
+                {"role": message.role, "content": message.content}
+                for message in candidates
+            ],
+        )
+    except AgentRunError:
+        return
+
+    update_conversation_memory(
+        conversation_id,
+        memory_summary=summary_result.answer,
+        memory_last_message_id=candidates[-1].id,
+    )
+
+
+def total_message_chars(messages) -> int:
+    return sum(len(message.content) for message in messages)
 
 
 def normalize_title(title: str, question: str) -> str:

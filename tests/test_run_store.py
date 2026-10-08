@@ -104,8 +104,33 @@ def test_conversation_and_messages_are_saved(tmp_path, monkeypatch):
 
     assert conversation is not None
     assert conversation.message_count == 2
+    assert conversation.memory_summary == ""
+    assert conversation.memory_last_message_id == 0
     assert messages[0].role == "user"
+    assert messages[0].status == "complete"
     assert messages[1].latency_ms == 321
+
+    run_store.update_message(
+        messages[1].id,
+        conversation_id=conversation_id,
+        content="streamed answer",
+        status="complete",
+        latency_ms=456,
+    )
+    run_store.update_conversation_memory(
+        conversation_id,
+        memory_summary="user prefers concise answers",
+        memory_last_message_id=messages[1].id,
+    )
+
+    updated_conversation = run_store.get_conversation(conversation_id)
+    updated_messages = run_store.list_messages(conversation_id)
+
+    assert updated_conversation is not None
+    assert updated_conversation.memory_summary == "user prefers concise answers"
+    assert updated_conversation.memory_last_message_id == messages[1].id
+    assert updated_messages[1].content == "streamed answer"
+    assert updated_messages[1].latency_ms == 456
 
 
 def test_eval_suite_case_run_and_result_are_saved(tmp_path, monkeypatch):

@@ -1,8 +1,18 @@
 :root {
   color-scheme: light;
   font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
-  background: #f5f7fb;
-  color: #18202f;
+  background: #f6f8ff;
+  color: #172033;
+  --accent: #2563eb;
+  --accent-strong: #1d4ed8;
+  --accent-soft: #e8f0ff;
+  --mint: #0f9f7a;
+  --mint-soft: #e7f8f2;
+  --rose: #d85a73;
+  --gold: #b7791f;
+  --border: #d9e3f0;
+  --panel: rgba(255, 255, 255, 0.92);
+  --text-muted: #627087;
 }
 
 * {
@@ -13,13 +23,13 @@ body {
   margin: 0;
   min-height: 100vh;
   background:
-    linear-gradient(135deg, rgba(69, 132, 181, 0.12), transparent 32%),
-    linear-gradient(225deg, rgba(52, 149, 121, 0.12), transparent 30%),
-    #f5f7fb;
+    radial-gradient(circle at 12% 8%, rgba(37, 99, 235, 0.14), transparent 26%),
+    radial-gradient(circle at 88% 10%, rgba(15, 159, 122, 0.13), transparent 24%),
+    linear-gradient(180deg, #f8fbff 0%, #eef4ff 45%, #f8fafc 100%);
 }
 
 a {
-  color: #1a67a8;
+  color: var(--accent-strong);
   text-decoration: none;
 }
 
@@ -43,7 +53,7 @@ a:hover {
 
 .eyebrow {
   margin: 0 0 6px;
-  color: #43715f;
+  color: var(--mint);
   font-size: 13px;
   font-weight: 700;
   letter-spacing: 0;
@@ -86,10 +96,10 @@ h3 {
   align-items: center;
   min-height: 36px;
   padding: 0 12px;
-  border: 1px solid #ccd7e2;
+  border: 1px solid var(--border);
   border-radius: 8px;
   background: #ffffff;
-  color: #36475d;
+  color: #34445c;
   font-size: 14px;
   white-space: nowrap;
 }
@@ -97,10 +107,11 @@ h3 {
 .notice,
 .alert,
 .panel {
-  border: 1px solid #dce4ec;
+  border: 1px solid var(--border);
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.9);
-  box-shadow: 0 10px 30px rgba(41, 58, 82, 0.08);
+  background: var(--panel);
+  box-shadow: 0 18px 45px rgba(40, 62, 110, 0.11);
+  backdrop-filter: blur(10px);
 }
 
 .notice {
@@ -160,7 +171,7 @@ button {
   border: 0;
   border-radius: 8px;
   padding: 0 18px;
-  background: #2170b3;
+  background: linear-gradient(135deg, var(--accent), var(--mint));
   color: #ffffff;
   font: inherit;
   font-weight: 700;
@@ -168,7 +179,7 @@ button {
 }
 
 button:hover {
-  background: #185f9c;
+  background: linear-gradient(135deg, var(--accent-strong), #0b8e6d);
 }
 
 button:disabled {
@@ -207,9 +218,20 @@ button:disabled {
 }
 
 .form-status.running {
-  border-color: #a9c9df;
-  color: #185f9c;
-  background: #eef7fd;
+  border-color: #9db9f7;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+}
+
+.form-status.running::before {
+  width: 12px;
+  height: 12px;
+  margin-right: 8px;
+  border: 2px solid rgba(37, 99, 235, 0.25);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  content: "";
+  animation: spin 0.8s linear infinite;
 }
 
 .panel-title-row {
@@ -507,20 +529,37 @@ dd {
 
 .message {
   max-width: 88%;
-  border: 1px solid #e1e7ef;
+  border: 1px solid #dfe8f4;
   border-radius: 8px;
   padding: 12px 14px;
-  background: #f9fbfd;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(31, 47, 79, 0.06);
+}
+
+.message-enter {
+  animation: message-enter 220ms ease-out;
 }
 
 .message.user {
   justify-self: end;
-  border-color: #c8dced;
-  background: #eef7fd;
+  border-color: #b9ccff;
+  background: linear-gradient(135deg, #eaf1ff, #f4f8ff);
 }
 
 .message.assistant {
   justify-self: start;
+  border-color: #cfe9df;
+  background: linear-gradient(135deg, #ffffff, #f0fbf7);
+}
+
+.message.streaming {
+  border-color: #9db9f7;
+  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.12);
+}
+
+.message.failed {
+  border-color: #f1b4bf;
+  background: #fff5f7;
 }
 
 .message-header {
@@ -538,6 +577,18 @@ dd {
   font: inherit;
   line-height: 1.7;
   white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.typing-indicator {
+  display: inline-flex;
+  width: 18px;
+  height: 18px;
+  margin-top: 10px;
+  border: 2px solid rgba(37, 99, 235, 0.2);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
 }
 
 .chat-form {
@@ -547,7 +598,9 @@ dd {
   margin: 0 -22px -22px;
   padding-top: 16px;
   padding: 16px 22px 22px;
-  background: rgba(255, 255, 255, 0.96);
+  background:
+    linear-gradient(90deg, rgba(37, 99, 235, 0.06), rgba(15, 159, 122, 0.05)),
+    rgba(255, 255, 255, 0.97);
 }
 
 .chat-form textarea {
@@ -692,6 +745,23 @@ dd {
 
 h4 {
   margin: 18px 0 8px;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
 }
 
 @media (max-width: 760px) {
