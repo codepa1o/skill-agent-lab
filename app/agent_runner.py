@@ -1,10 +1,11 @@
 import json
 import os
 import time
+from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any
 
-from openai import OpenAI, OpenAIError
+from openai import AsyncOpenAI, OpenAI, OpenAIError
 
 
 DEFAULT_MODEL = "gpt-5.2"
@@ -13,6 +14,7 @@ DEFAULT_MAX_RETRIES = 2
 DEFAULT_RETRY_DELAY_SECONDS = 2
 DEFAULT_TIMEOUT_SECONDS = 120
 FALLBACK_MAX_OUTPUT_TOKENS = 4096
+SUMMARY_MAX_OUTPUT_TOKENS = 700
 
 
 class AgentRunError(RuntimeError):
@@ -148,6 +150,39 @@ def _build_judge_input(
 """.strip()
 
 
+def _build_memory_summary_instructions() -> str:
+    return """
+You compress a chat transcript into durable memory for a future assistant turn.
+Keep only information that could matter later: user goals, preferences, constraints,
+decisions, project details, unresolved tasks, and important assistant conclusions.
+Do not invent facts. Write concise Chinese unless the transcript clearly uses another language.
+Return only the updated memory summary, no preface.
+""".strip()
+
+
+def _build_memory_summary_prompt(
+    existing_summary: str,
+    messages: list[dict[str, str]],
+) -> str:
+    transcript_lines = []
+    for message in messages:
+        role = message.get("role", "").strip()
+        content = message.get("content", "").strip()
+        if role in {"user", "assistant"} and content:
+            transcript_lines.append(f"{role}: {content}")
+
+    transcript = "\n".join(transcript_lines)
+    return f"""
+Existing long-term memory:
+{existing_summary.strip() or "(empty)"}
+
+New transcript segment:
+{transcript}
+
+Update the long-term memory so future turns can continue without needing the full old transcript.
+""".strip()
+
+
 def run_skill_agent(skill_content: str, question: str) -> AgentResult:
     return run_skill_agent_chat(
         skill_content,
@@ -192,6 +227,74 @@ def run_skill_agent_chat(
         )
 
     return AgentResult(answer=answer, model=model, latency_ms=latency_ms)
+
+
+async def stream_skill_agent_chat(
+    skill_content: str,
+    messages: list[dict[str, str]],
+) -> AsyncIterator[str]:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise AgentRunError("OPENAI_API_KEY is missing. Add it to .env before starting a chat.")
+
+    model = get_model_name()
+    api_mode = get_api_mode()
+    client = AsyncOpenAI(
+        api_key=api_key,
+        base_url=get_base_url() or None,
+        timeout=get_timeout_seconds(),
+    )
+    instructions = _build_instructions(skill_content)
+
+    try:
+        if api_mode == "responses":
+            async for text in _stream_responses(client, model, instructions, messages):
+                yield text
+            return
+        if api_mode == "chat_completions":
+            async for text in _stream_chat_completions(client, model, instructions, messages):
+                yield text
+            return
+        raise AgentRunError("OPENAI_API_MODE must be chat_completions or responses.")
+    except AgentRunError:
+        raise
+    except OpenAIError as exc:
+        raise AgentRunError(_format_openai_error(exc, get_base_url())) from exc
+    except Exception as exc:
+        raise AgentRunError(f"Model streaming failed: {exc}") from exc
+
+
+def summarize_conversation_memory(
+    *,
+    existing_summary: str,
+    messages: list[dict[str, str]],
+) -> AgentResult:
+    api_key = os.getenv("OPENAI_API_KEY", "").strip()
+    if not api_key:
+        raise AgentRunError("OPENAI_API_KEY is missing. Add it to .env before compressing memory.")
+
+    model = get_model_name()
+    api_mode = get_api_mode()
+    client = OpenAI(
+        api_key=api_key,
+        base_url=get_base_url() or None,
+        timeout=get_timeout_seconds(),
+    )
+    started_at = time.perf_counter()
+    answer = _run_with_retries(
+        lambda: _run_once(
+            client,
+            api_mode,
+            model,
+            _build_memory_summary_instructions(),
+            [{"role": "user", "content": _build_memory_summary_prompt(existing_summary, messages)}],
+            max_output_tokens=SUMMARY_MAX_OUTPUT_TOKENS,
+            reasoning_effort_override="low",
+        ),
+        get_base_url(),
+    )
+    latency_ms = int((time.perf_counter() - started_at) * 1000)
+    return AgentResult(answer=answer.strip(), model=model, latency_ms=latency_ms)
 
 
 def run_judge_agent(
@@ -275,11 +378,28 @@ def _run_once(
     model: str,
     instructions: str,
     messages: list[dict[str, str]],
+    *,
+    max_output_tokens: int | None = None,
+    reasoning_effort_override: str | None = None,
 ) -> str:
     if api_mode == "responses":
-        return _run_responses(client, model, instructions, messages)
+        return _run_responses(
+            client,
+            model,
+            instructions,
+            messages,
+            max_output_tokens=max_output_tokens,
+            reasoning_effort_override=reasoning_effort_override,
+        )
     if api_mode == "chat_completions":
-        return _run_chat_completions(client, model, instructions, messages)
+        return _run_chat_completions(
+            client,
+            model,
+            instructions,
+            messages,
+            max_output_tokens=max_output_tokens,
+            reasoning_effort_override=reasoning_effort_override,
+        )
     raise AgentRunError("OPENAI_API_MODE 只能设置为 chat_completions 或 responses。")
 
 
@@ -401,25 +521,77 @@ def _looks_like_answer_text(text: str, value_type: str, parent_key: str) -> bool
     return False
 
 
+def _responses_payload(
+    *,
+    model: str,
+    instructions: str,
+    messages: list[dict[str, str]],
+    max_output_tokens: int | None = None,
+    reasoning_effort_override: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": model,
+        "instructions": instructions,
+        "input": _format_response_transcript(messages),
+    }
+    reasoning_effort = (
+        reasoning_effort_override
+        if reasoning_effort_override is not None
+        else get_reasoning_effort()
+    )
+    if reasoning_effort:
+        payload["reasoning"] = {"effort": reasoning_effort}
+    if should_disable_response_storage():
+        payload["store"] = False
+    resolved_max_output_tokens = max_output_tokens or get_max_output_tokens()
+    if resolved_max_output_tokens:
+        payload["max_output_tokens"] = resolved_max_output_tokens
+    return payload
+
+
+def _chat_completions_payload(
+    *,
+    model: str,
+    instructions: str,
+    messages: list[dict[str, str]],
+    max_output_tokens: int | None = None,
+    reasoning_effort_override: str | None = None,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "model": model,
+        "messages": [{"role": "system", "content": instructions}, *_format_response_messages(messages)],
+    }
+    resolved_max_output_tokens = max_output_tokens or get_max_output_tokens()
+    if resolved_max_output_tokens:
+        payload["max_completion_tokens"] = resolved_max_output_tokens
+    reasoning_effort = (
+        reasoning_effort_override
+        if reasoning_effort_override is not None
+        else get_reasoning_effort()
+    )
+    if reasoning_effort:
+        payload["reasoning_effort"] = reasoning_effort
+    if should_disable_response_storage():
+        payload["store"] = False
+    return payload
+
+
 def _run_responses(
     client: OpenAI,
     model: str,
     instructions: str,
     messages: list[dict[str, str]],
+    *,
+    max_output_tokens: int | None = None,
+    reasoning_effort_override: str | None = None,
 ) -> str:
-    payload = {
-        "model": model,
-        "instructions": instructions,
-        "input": _format_response_transcript(messages),
-    }
-    reasoning_effort = get_reasoning_effort()
-    if reasoning_effort:
-        payload["reasoning"] = {"effort": reasoning_effort}
-    if should_disable_response_storage():
-        payload["store"] = False
-    max_output_tokens = get_max_output_tokens()
-    if max_output_tokens:
-        payload["max_output_tokens"] = max_output_tokens
+    payload = _responses_payload(
+        model=model,
+        instructions=instructions,
+        messages=messages,
+        max_output_tokens=max_output_tokens,
+        reasoning_effort_override=reasoning_effort_override,
+    )
 
     response = client.responses.create(**payload)
     answer = _extract_response_text(response)
@@ -468,13 +640,65 @@ def _run_chat_completions(
     model: str,
     instructions: str,
     messages: list[dict[str, str]],
+    *,
+    max_output_tokens: int | None = None,
+    reasoning_effort_override: str | None = None,
 ) -> str:
-    response = client.chat.completions.create(
+    payload = _chat_completions_payload(
         model=model,
-        messages=[{"role": "system", "content": instructions}, *messages],
+        instructions=instructions,
+        messages=messages,
+        max_output_tokens=max_output_tokens,
+        reasoning_effort_override=reasoning_effort_override,
     )
+    response = client.chat.completions.create(**payload)
     message = response.choices[0].message
     return (message.content or "").strip()
+
+
+async def _stream_responses(
+    client: AsyncOpenAI,
+    model: str,
+    instructions: str,
+    messages: list[dict[str, str]],
+) -> AsyncIterator[str]:
+    payload = _responses_payload(
+        model=model,
+        instructions=instructions,
+        messages=messages,
+    )
+    async with client.responses.stream(**payload) as stream:
+        async for event in stream:
+            if getattr(event, "type", "") != "response.output_text.delta":
+                continue
+            delta = getattr(event, "delta", "")
+            if delta:
+                yield delta
+        response = await stream.get_final_response()
+        status_message = _response_status_message(response)
+        if status_message:
+            raise AgentRunError(status_message)
+
+
+async def _stream_chat_completions(
+    client: AsyncOpenAI,
+    model: str,
+    instructions: str,
+    messages: list[dict[str, str]],
+) -> AsyncIterator[str]:
+    payload = _chat_completions_payload(
+        model=model,
+        instructions=instructions,
+        messages=messages,
+    )
+    async with client.chat.completions.stream(**payload) as stream:
+        async for event in stream:
+            if getattr(event, "type", "") != "content.delta":
+                continue
+            delta = getattr(event, "delta", "")
+            if delta:
+                yield delta
+        await stream.get_final_completion()
 
 
 def _format_response_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:

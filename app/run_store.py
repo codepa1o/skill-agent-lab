@@ -68,6 +68,9 @@ CREATE TABLE IF NOT EXISTS conversations (
     api_mode TEXT NOT NULL,
     base_url TEXT NOT NULL,
     reasoning_effort TEXT NOT NULL,
+    memory_summary TEXT NOT NULL DEFAULT '',
+    memory_last_message_id INTEGER NOT NULL DEFAULT 0,
+    memory_updated_at TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 )
@@ -79,6 +82,7 @@ CREATE TABLE IF NOT EXISTS messages (
     conversation_id INTEGER NOT NULL,
     role TEXT NOT NULL,
     content TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'complete',
     latency_ms INTEGER NOT NULL DEFAULT 0,
     error_message TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL,
@@ -194,6 +198,9 @@ class ConversationRecord:
     api_mode: str
     base_url: str
     reasoning_effort: str
+    memory_summary: str
+    memory_last_message_id: int
+    memory_updated_at: str
     created_at: str
     updated_at: str
     message_count: int = 0
@@ -205,6 +212,7 @@ class MessageRecord:
     conversation_id: int
     role: str
     content: str
+    status: str
     latency_ms: int
     error_message: str
     created_at: str
@@ -349,6 +357,10 @@ def init_db() -> None:
         _ensure_column(connection, "runs", "search_results", "TEXT NOT NULL DEFAULT ''")
         _ensure_column(connection, "runs", "rag_used", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(connection, "runs", "rag_results", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "conversations", "memory_summary", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "conversations", "memory_last_message_id", "INTEGER NOT NULL DEFAULT 0")
+        _ensure_column(connection, "conversations", "memory_updated_at", "TEXT NOT NULL DEFAULT ''")
+        _ensure_column(connection, "messages", "status", "TEXT NOT NULL DEFAULT 'complete'")
         _ensure_column(connection, "eval_results", "variant", "TEXT NOT NULL DEFAULT 'enhanced'")
         _ensure_column(connection, "eval_results", "source_usage", "INTEGER NOT NULL DEFAULT 0")
         _ensure_column(connection, "eval_results", "search_used", "INTEGER NOT NULL DEFAULT 0")
@@ -479,9 +491,10 @@ def create_conversation(
             """
             INSERT INTO conversations (
                 title, skill_url, raw_url, model, api_mode, base_url,
-                reasoning_effort, created_at, updated_at
+                reasoning_effort, memory_summary, memory_last_message_id,
+                memory_updated_at, created_at, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 title,
@@ -491,6 +504,9 @@ def create_conversation(
                 api_mode,
                 base_url,
                 reasoning_effort,
+                "",
+                0,
+                created_at,
                 created_at,
                 created_at,
             ),
@@ -504,7 +520,8 @@ def list_conversations(limit: int = 50) -> list[ConversationRecord]:
         rows = connection.execute(
             """
             SELECT c.id, c.title, c.skill_url, c.raw_url, c.model, c.api_mode,
-                   c.base_url, c.reasoning_effort, c.created_at, c.updated_at,
+                   c.base_url, c.reasoning_effort, c.memory_summary,
+                   c.memory_last_message_id, c.memory_updated_at, c.created_at, c.updated_at,
                    COUNT(m.id) AS message_count
             FROM conversations c
             LEFT JOIN messages m ON m.conversation_id = c.id
@@ -523,7 +540,8 @@ def get_conversation(conversation_id: int) -> ConversationRecord | None:
         row = connection.execute(
             """
             SELECT c.id, c.title, c.skill_url, c.raw_url, c.model, c.api_mode,
-                   c.base_url, c.reasoning_effort, c.created_at, c.updated_at,
+                   c.base_url, c.reasoning_effort, c.memory_summary,
+                   c.memory_last_message_id, c.memory_updated_at, c.created_at, c.updated_at,
                    COUNT(m.id) AS message_count
             FROM conversations c
             LEFT JOIN messages m ON m.conversation_id = c.id
@@ -556,11 +574,30 @@ def touch_conversation(conversation_id: int) -> None:
         )
 
 
+def update_conversation_memory(
+    conversation_id: int,
+    *,
+    memory_summary: str,
+    memory_last_message_id: int,
+) -> None:
+    init_db()
+    with _connect() as connection:
+        connection.execute(
+            """
+            UPDATE conversations
+            SET memory_summary = ?, memory_last_message_id = ?, memory_updated_at = ?, updated_at = ?
+            WHERE id = ?
+            """,
+            (memory_summary, memory_last_message_id, _now(), _now(), conversation_id),
+        )
+
+
 def create_message(
     *,
     conversation_id: int,
     role: str,
     content: str,
+    status: str = "complete",
     latency_ms: int = 0,
     error_message: str = "",
 ) -> int:
@@ -569,14 +606,53 @@ def create_message(
         cursor = connection.execute(
             """
             INSERT INTO messages (
-                conversation_id, role, content, latency_ms, error_message, created_at
+                conversation_id, role, content, status, latency_ms, error_message, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
             """,
-            (conversation_id, role, content, latency_ms, error_message, _now()),
+            (conversation_id, role, content, status, latency_ms, error_message, _now()),
         )
     touch_conversation(conversation_id)
     return int(cursor.lastrowid)
+
+
+def update_message(
+    message_id: int,
+    *,
+    conversation_id: int,
+    content: str | None = None,
+    status: str | None = None,
+    latency_ms: int | None = None,
+    error_message: str | None = None,
+) -> None:
+    init_db()
+    updates: list[str] = []
+    values: list[object] = []
+    if content is not None:
+        updates.append("content = ?")
+        values.append(content)
+    if status is not None:
+        updates.append("status = ?")
+        values.append(status)
+    if latency_ms is not None:
+        updates.append("latency_ms = ?")
+        values.append(latency_ms)
+    if error_message is not None:
+        updates.append("error_message = ?")
+        values.append(error_message)
+    if not updates:
+        return
+    values.extend([message_id])
+    with _connect() as connection:
+        connection.execute(
+            f"""
+            UPDATE messages
+            SET {', '.join(updates)}
+            WHERE id = ? AND conversation_id = ?
+            """,
+            tuple([*values, conversation_id]),
+        )
+    touch_conversation(conversation_id)
 
 
 def list_messages(conversation_id: int) -> list[MessageRecord]:
@@ -584,7 +660,7 @@ def list_messages(conversation_id: int) -> list[MessageRecord]:
     with _connect() as connection:
         rows = connection.execute(
             """
-            SELECT id, conversation_id, role, content, latency_ms, error_message, created_at
+            SELECT id, conversation_id, role, content, status, latency_ms, error_message, created_at
             FROM messages
             WHERE conversation_id = ?
             ORDER BY id ASC
@@ -592,6 +668,22 @@ def list_messages(conversation_id: int) -> list[MessageRecord]:
             (conversation_id,),
         ).fetchall()
     return [_row_to_message(row) for row in rows]
+
+
+def get_message(message_id: int, conversation_id: int | None = None) -> MessageRecord | None:
+    init_db()
+    query = """
+        SELECT id, conversation_id, role, content, status, latency_ms, error_message, created_at
+        FROM messages
+        WHERE id = ?
+    """
+    values: list[object] = [message_id]
+    if conversation_id is not None:
+        query += " AND conversation_id = ?"
+        values.append(conversation_id)
+    with _connect() as connection:
+        row = connection.execute(query, tuple(values)).fetchone()
+    return _row_to_message(row) if row else None
 
 
 def create_test_suite(*, name: str, skill_url: str, description: str = "") -> int:
@@ -1105,6 +1197,9 @@ def _row_to_conversation(row: sqlite3.Row) -> ConversationRecord:
         api_mode=row["api_mode"],
         base_url=row["base_url"],
         reasoning_effort=row["reasoning_effort"],
+        memory_summary=row["memory_summary"],
+        memory_last_message_id=row["memory_last_message_id"],
+        memory_updated_at=row["memory_updated_at"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
         message_count=row["message_count"],
@@ -1117,6 +1212,7 @@ def _row_to_message(row: sqlite3.Row) -> MessageRecord:
         conversation_id=row["conversation_id"],
         role=row["role"],
         content=row["content"],
+        status=row["status"],
         latency_ms=row["latency_ms"],
         error_message=row["error_message"],
         created_at=row["created_at"],
